@@ -7,9 +7,8 @@ from google.oauth2 import service_account
 from googleapiclient.http import MediaIoBaseDownload
 import io
 
-# --- CONFIGURAÇÕES ---
-LINK_PLANILHA_GOOGLE = "COLE_AQUI_O_LINK_INTEIRO_DA_SUA_PLANILHA_DO_SHEETS"
-ID_ARQUIVO_EXCEL = "COLE_AQUI_O_ID_DO_ARQUIVO_EXCEL_ORCAMENTOS"
+# ID do Excel (Orçamentos)
+ID_ARQUIVO_EXCEL = "COLE_O_ID_DO_ARQUIVO_EXCEL_AQUI"
 
 def download_excel_drive(file_id):
     try:
@@ -31,6 +30,8 @@ def download_excel_drive(file_id):
 
 def show_page():
     st.header("📝 Editor de Plano de Ação")
+    
+    # CONEXÃO INTELIGENTE: Pega o link do secrets.toml
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     @st.cache_data(ttl=600)
@@ -46,8 +47,8 @@ def show_page():
 
         opcoes_frota = []
         try:
-            # CORREÇÃO AQUI TAMBÉM: Usando o link direto
-            df_frota = conn.read(spreadsheet=LINK_PLANILHA_GOOGLE, worksheet="Frota")
+            # Lê aba Frota (usa link do secrets)
+            df_frota = conn.read(worksheet="Frota")
             if 'Modelo' in df_frota.columns and 'Placa' in df_frota.columns:
                 df_frota['Label'] = df_frota['Modelo'] + " - " + df_frota['Placa']
                 opcoes_frota = sorted(df_frota['Label'].dropna().unique().tolist())
@@ -58,8 +59,8 @@ def show_page():
     lista_obras, lista_frota = load_options()
 
     try:
-        # CORREÇÃO AQUI TAMBÉM
-        df_agenda = conn.read(spreadsheet=LINK_PLANILHA_GOOGLE, worksheet="Agenda")
+        # Lê aba Agenda (usa link do secrets)
+        df_agenda = conn.read(worksheet="Agenda")
         
         if not df_agenda.empty:
             df_agenda["Data_Inicio"] = pd.to_datetime(df_agenda["Data_Inicio"], errors='coerce')
@@ -82,15 +83,12 @@ def show_page():
         )
 
         if st.button("💾 Salvar Alterações", type="primary"):
-            if not edited_df.empty and edited_df.duplicated(subset=['Veiculo', 'Data_Inicio']).any():
-                st.warning("⚠️ Veículos duplicados na mesma data!")
-            
             df_save = edited_df.copy()
             df_save["Data_Inicio"] = df_save["Data_Inicio"].dt.strftime('%Y-%m-%d')
             df_save["Data_Fim"] = df_save["Data_Fim"].dt.strftime('%Y-%m-%d')
             
-            # CORREÇÃO AQUI TAMBÉM: Passando o link na hora de atualizar
-            conn.update(spreadsheet=LINK_PLANILHA_GOOGLE, worksheet="Agenda", data=df_save)
+            # Salva na aba Agenda (usa link do secrets)
+            conn.update(worksheet="Agenda", data=df_save)
             st.success("✅ Salvo no Google Drive!")
             
     except Exception as e:
