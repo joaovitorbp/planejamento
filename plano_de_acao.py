@@ -7,11 +7,11 @@ from google.oauth2 import service_account
 from googleapiclient.http import MediaIoBaseDownload
 import io
 
-# ID do arquivo Excel (O MESMO DO OUTRO ARQUIVO)
-ID_ARQUIVO_EXCEL = "COLE_O_ID_DO_EXCEL_AQUI"
+# --- CONFIGURAÇÕES ---
+LINK_PLANILHA_GOOGLE = "COLE_AQUI_O_LINK_INTEIRO_DA_SUA_PLANILHA_DO_SHEETS"
+ID_ARQUIVO_EXCEL = "COLE_AQUI_O_ID_DO_ARQUIVO_EXCEL_ORCAMENTOS"
 
 def download_excel_drive(file_id):
-    """Função auxiliar para baixar do Drive"""
     try:
         creds_dict = dict(st.secrets["connections"]["gsheets"])
         creds = service_account.Credentials.from_service_account_info(
@@ -35,10 +35,8 @@ def show_page():
 
     @st.cache_data(ttl=600)
     def load_options():
-        # 1. ORÇAMENTOS (Direto do Drive)
         opcoes_obras = []
         df_excel = download_excel_drive(ID_ARQUIVO_EXCEL)
-        
         if not df_excel.empty:
             c_orc = next((c for c in df_excel.columns if "ORÇAMENTO" in c.upper()), None)
             c_loc = next((c for c in df_excel.columns if "LOCAL" in c.upper()), None)
@@ -46,10 +44,10 @@ def show_page():
                 df_excel['Label'] = df_excel[c_orc].astype(str) + " - " + df_excel[c_loc].astype(str)
                 opcoes_obras = sorted(df_excel['Label'].dropna().unique().tolist())
 
-        # 2. FROTA (Google Sheets)
         opcoes_frota = []
         try:
-            df_frota = conn.read(worksheet="Frota")
+            # CORREÇÃO AQUI TAMBÉM: Usando o link direto
+            df_frota = conn.read(spreadsheet=LINK_PLANILHA_GOOGLE, worksheet="Frota")
             if 'Modelo' in df_frota.columns and 'Placa' in df_frota.columns:
                 df_frota['Label'] = df_frota['Modelo'] + " - " + df_frota['Placa']
                 opcoes_frota = sorted(df_frota['Label'].dropna().unique().tolist())
@@ -60,7 +58,9 @@ def show_page():
     lista_obras, lista_frota = load_options()
 
     try:
-        df_agenda = conn.read(worksheet="Agenda")
+        # CORREÇÃO AQUI TAMBÉM
+        df_agenda = conn.read(spreadsheet=LINK_PLANILHA_GOOGLE, worksheet="Agenda")
+        
         if not df_agenda.empty:
             df_agenda["Data_Inicio"] = pd.to_datetime(df_agenda["Data_Inicio"], errors='coerce')
             df_agenda["Data_Fim"] = pd.to_datetime(df_agenda["Data_Fim"], errors='coerce')
@@ -88,7 +88,9 @@ def show_page():
             df_save = edited_df.copy()
             df_save["Data_Inicio"] = df_save["Data_Inicio"].dt.strftime('%Y-%m-%d')
             df_save["Data_Fim"] = df_save["Data_Fim"].dt.strftime('%Y-%m-%d')
-            conn.update(worksheet="Agenda", data=df_save)
+            
+            # CORREÇÃO AQUI TAMBÉM: Passando o link na hora de atualizar
+            conn.update(spreadsheet=LINK_PLANILHA_GOOGLE, worksheet="Agenda", data=df_save)
             st.success("✅ Salvo no Google Drive!")
             
     except Exception as e:
