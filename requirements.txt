@@ -4,4 +4,3 @@ plotly
 openpyxl
 streamlit-gsheets
 google-api-python-client
-google-auth
