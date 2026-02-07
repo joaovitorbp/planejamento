@@ -3,133 +3,108 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
 
-st.set_page_config(page_title="Editor de Programação", layout="wide")
+def show_page():
+    st.header("📝 Plano de Ação (Editor)")
+    st.markdown("Defina a programação para a próxima semana.")
 
-conn = st.connection("gsheets", type=GSheetsConnection)
+    conn = st.connection("gsheets", type=GSheetsConnection)
 
-st.title("✏️ Editor de Programação Semanal")
-st.markdown("Adicione as obras, defina a equipe e selecione o veículo na tabela abaixo.")
+    # --- CARREGAR OPÇÕES (DROPDOWNS) ---
+    @st.cache_data(ttl=600)
+    def load_options():
+        # 1. ORÇAMENTOS (do Excel Local: dados_dashboard_obras.xlsx)
+        opcoes_obras = []
+        try:
+            df_excel = pd.read_excel("dados_dashboard_obras.xlsx")
+            # Procura colunas dinamicamente
+            c_orc = next((c for c in df_excel.columns if "ORÇAMENTO" in c.upper()), None)
+            c_loc = next((c for c in df_excel.columns if "LOCAL" in c.upper()), None)
+            
+            if c_orc and c_loc:
+                df_excel['Label'] = df_excel[c_orc].astype(str) + " - " + df_excel[c_loc].astype(str)
+                opcoes_obras = sorted(df_excel['Label'].dropna().unique().tolist())
+        except:
+            pass # Lista fica vazia se der erro
 
-# --- 1. CARREGAR OPÇÕES (Listas Suspensas) ---
-@st.cache_data(ttl=600)
-def load_options():
-    # A) Orçamentos (do Excel Local)
-    opcoes_obras = []
-    try:
-        df_excel = pd.read_excel("orcamentos.xlsx")
-        # Cria rótulo: "CODIGO - LOCAL"
-        # Ajuste os nomes das colunas conforme seu Excel
-        if 'ORÇAMENTO' in df_excel.columns and 'LOCAL' in df_excel.columns:
-            df_excel['Label'] = df_excel['ORÇAMENTO'].astype(str) + " - " + df_excel['LOCAL'].astype(str)
-            opcoes_obras = df_excel['Label'].dropna().unique().tolist()
-    except:
-        pass # Se der erro, a lista fica vazia
-
-    # B) Frota e Time (do Google Sheets)
-    try:
-        df_frota = conn.read(worksheet="Frota")
-        df_time = conn.read(worksheet="Time")
-        
-        # Frota: "MODELO - PLACA"
+        # 2. FROTA (do Google Sheets - Aba: Frota)
         opcoes_frota = []
-        if 'Modelo' in df_frota.columns and 'Placa' in df_frota.columns:
-            df_frota['Label'] = df_frota['Modelo'] + " - " + df_frota['Placa']
-            opcoes_frota = df_frota['Label'].dropna().unique().tolist()
-            
-        # Time (Apenas lista de nomes para referência)
-        opcoes_time = []
-        if 'Nome' in df_time.columns:
-            opcoes_time = df_time['Nome'].dropna().unique().tolist()
-            
-    except:
-        opcoes_frota = []
-        opcoes_time = []
-
-    return opcoes_obras, opcoes_frota, opcoes_time
-
-# Carrega as listas
-lista_obras, lista_frota, lista_time = load_options()
-
-# --- 2. EDITOR DE DADOS ---
-try:
-    df_agenda = conn.read(worksheet="Agenda")
-    
-    # Tratamento inicial para o Editor não quebrar
-    if not df_agenda.empty:
-        df_agenda["Data_Inicio"] = pd.to_datetime(df_agenda["Data_Inicio"])
-        df_agenda["Data_Fim"] = pd.to_datetime(df_agenda["Data_Fim"])
-        df_agenda["Orcamento"] = df_agenda["Orcamento"].astype(str)
-
-    # Exibe a tabela editável
-    edited_df = st.data_editor(
-        df_agenda,
-        num_rows="dynamic", # Permite clicar no botão "+"
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "ID": st.column_config.TextColumn("ID (Auto)", disabled=True),
-            
-            "Orcamento": st.column_config.SelectboxColumn(
-                "Selecione a Obra",
-                options=lista_obras,
-                width="large",
-                required=True,
-                help="Lista carregada do Excel de Orçamentos"
-            ),
-            
-            "Equipe": st.column_config.TextColumn(
-                "Equipe Técnica",
-                width="medium",
-                help="Digite os nomes separados por vírgula (Ex: Tiago, Willity)"
-            ),
-            
-            "Veiculo": st.column_config.SelectboxColumn(
-                "Veículo da Frota",
-                options=lista_frota,
-                width="medium",
-                required=True,
-                help="Selecione qual carro levará a equipe"
-            ),
-            
-            "Data_Inicio": st.column_config.DateColumn("Início", format="DD/MM/YYYY", step=1),
-            "Data_Fim": st.column_config.DateColumn("Fim", format="DD/MM/YYYY", step=1),
-        }
-    )
-
-    # --- 3. VALIDAÇÃO E SALVAMENTO ---
-    st.caption("Dica: Para adicionar uma nova obra, clique no botão '+' na última linha da tabela.")
-    
-    if st.button("💾 Salvar Alterações no Drive", type="primary"):
-        salvar = True
+        try:
+            df_frota = conn.read(worksheet="Frota")
+            # Assume colunas Modelo e Placa
+            if 'Modelo' in df_frota.columns and 'Placa' in df_frota.columns:
+                df_frota['Label'] = df_frota['Modelo'] + " - " + df_frota['Placa']
+                opcoes_frota = sorted(df_frota['Label'].dropna().unique().tolist())
+        except: pass
         
-        # Validação 1: Conflito de Veículos
-        # Verifica se tem o mesmo carro iniciando na mesma data em linhas diferentes
-        if edited_df.duplicated(subset=['Veiculo', 'Data_Inicio']).any():
-            st.warning("⚠️ ALERTA DE LOGÍSTICA: Você alocou o mesmo veículo para obras diferentes na mesma data!")
-            # Não impedimos de salvar, apenas avisamos (decisão do usuário)
+        # 3. TIME (do Google Sheets - Aba: Time) - Opcional, se quiser lista de nomes
+        # Apenas para referência, já que no editor será texto livre ou multiselect simulado
         
-        # Validação 2: Limpeza do Código do Orçamento
-        # O usuário vê "2025 1891 - Cerradão", mas queremos salvar só "2025 1891"
-        df_to_save = edited_df.copy()
+        return opcoes_obras, opcoes_frota
+
+    lista_obras, lista_frota = load_options()
+
+    # --- EDITOR DE DADOS ---
+    try:
+        # Lê a Agenda atual
+        df_agenda = conn.read(worksheet="Agenda")
         
-        # Função para limpar o texto do orçamento (pega tudo antes do primeiro " - ")
-        def limpar_orcamento(valor):
-            if isinstance(valor, str) and " - " in valor:
-                return valor.split(" - ")[0]
-            return valor
-            
-        df_to_save['Orcamento'] = df_to_save['Orcamento'].apply(limpar_orcamento)
-        
-        if salvar:
-            try:
-                conn.update(worksheet="Agenda", data=df_to_save)
-                st.success("✅ Programação salva com sucesso no Google Drive!")
-                st.balloons()
+        # Garante formatação
+        if not df_agenda.empty:
+            df_agenda["Data_Inicio"] = pd.to_datetime(df_agenda["Data_Inicio"], errors='coerce')
+            df_agenda["Data_Fim"] = pd.to_datetime(df_agenda["Data_Fim"], errors='coerce')
+            df_agenda["Orcamento"] = df_agenda["Orcamento"].astype(str)
+
+        # Mostra o Editor
+        edited_df = st.data_editor(
+            df_agenda,
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "ID": st.column_config.TextColumn("ID", disabled=True),
                 
-                # Recarrega a página para atualizar visualmente (opcional)
-                # st.rerun() 
-            except Exception as e:
-                st.error(f"Erro técnico ao salvar: {e}")
+                "Orcamento": st.column_config.SelectboxColumn(
+                    "Obra", 
+                    options=lista_obras, 
+                    width="large", 
+                    required=True
+                ),
+                
+                "Equipe": st.column_config.TextColumn(
+                    "Equipe", 
+                    width="medium", 
+                    help="Nomes separados por vírgula"
+                ),
+                
+                "Veiculo": st.column_config.SelectboxColumn(
+                    "Veículo", 
+                    options=lista_frota, 
+                    width="medium", 
+                    required=True
+                ),
+                
+                "Data_Inicio": st.column_config.DateColumn("Início", format="DD/MM/YYYY", step=1),
+                "Data_Fim": st.column_config.DateColumn("Fim", format="DD/MM/YYYY", step=1),
+            }
+        )
 
-except Exception as e:
-    st.error(f"Erro ao carregar a Agenda. Verifique se a planilha Google tem a aba 'Agenda'. Detalhe: {e}")
+        # --- BOTÃO SALVAR ---
+        if st.button("💾 Salvar Alterações no Drive", type="primary"):
+            # Validação simples de conflito
+            if not edited_df.empty and edited_df.duplicated(subset=['Veiculo', 'Data_Inicio']).any():
+                st.warning("⚠️ Atenção: Existem veículos alocados 2x na mesma data!")
+            
+            # Prepara dados para salvar (Converte datas para string YYYY-MM-DD)
+            df_save = edited_df.copy()
+            df_save["Data_Inicio"] = df_save["Data_Inicio"].dt.strftime('%Y-%m-%d')
+            df_save["Data_Fim"] = df_save["Data_Fim"].dt.strftime('%Y-%m-%d')
+            
+            # Limpeza opcional: Salvar só o código do orçamento, tirando o nome da cidade
+            # def limpar_cod(valor): return valor.split(" - ")[0] if " - " in str(valor) else valor
+            # df_save["Orcamento"] = df_save["Orcamento"].apply(limpar_cod)
+
+            conn.update(worksheet="Agenda", data=df_save)
+            st.success("✅ Atualizado com sucesso!")
+            
+    except Exception as e:
+        st.error(f"Erro ao carregar o editor: {e}")
