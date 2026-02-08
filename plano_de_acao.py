@@ -1,101 +1,86 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-from datetime import datetime
+import conexao
 
-# ==========================================
-# ⚠️ LINK DA PLANILHA DE ORÇAMENTOS
-# ==========================================
-URL_ORCAMENTOS = "https://docs.google.com/spreadsheets/d/1CZQCkEnWLVxnwBqAtyMrV_WsiXU5XIvn/edit?gid=1069183619#gid=1069183619"
-# ==========================================
-
-def show_page():
+def app():
     st.header("📝 Editor de Plano de Ação")
-    
-    conn = st.connection("gsheets", type=GSheetsConnection)
 
-    # --- CARREGA AS OPÇÕES DOS DROPDOWNS ---
-    @st.cache_data(ttl=600)
-    def load_options():
-        # 1. Opções de Obras (Lê direto do Link fornecido)
-        opcoes_obras = []
-        try:
-            df_obras = conn.read(spreadsheet=URL_ORCAMENTOS)
-            
-            c_orc = next((c for c in df_obras.columns if "ORÇAMENTO" in c.upper()), None)
-            c_loc = next((c for c in df_obras.columns if "LOCAL" in c.upper()), None)
-            
-            if c_orc and c_loc:
-                df_obras['Label'] = df_obras[c_orc].astype(str) + " - " + df_obras[c_loc].astype(str)
-                opcoes_obras = sorted(df_obras['Label'].dropna().unique().tolist())
-        except Exception:
-            pass # Se falhar, lista fica vazia
+    # Carregar Dados
+    df_agenda, df_frota, df_obras = conexao.carregar_dados()
 
-        # 2. Opções de Frota (Lê da planilha configurada no secrets)
-        opcoes_frota = []
-        try:
-            df_frota = conn.read(worksheet="Frota")
-            if 'Modelo' in df_frota.columns and 'Placa' in df_frota.columns:
-                df_frota['Label'] = df_frota['Modelo'] + " - " + df_frota['Placa']
-                opcoes_frota = sorted(df_frota['Label'].dropna().unique().tolist())
-        except: 
-            pass
+    # Prepara listas para Dropdowns
+    lista_veiculos = df_frota['placa'].unique().tolist() if 'placa' in df_frota.columns else []
+    lista_obras = df_obras['cod_orcamento'].astype(str).unique().tolist() if 'cod_orcamento' in df_obras.columns else []
+
+    st.info("Edite os dados abaixo e clique em Salvar para atualizar o Google Sheets.")
+
+    # Data Editor
+    df_editado = st.data_editor(
+        df_agenda,
+        num_rows="dynamic",
+        column_config={
+            "cod_orcamento": st.column_config.SelectboxColumn(
+                "Obra/Orçamento",
+                help="Selecione o código do orçamento",
+                options=lista_obras,
+                required=True
+            ),
+            "veiculo": st.column_config.SelectboxColumn(
+                "Veículo",
+                help="Selecione o veículo da frota",
+                options=lista_veiculos,
+                required=True
+            ),
+            "data_inicio": st.column_config.DateColumn("Início", format="DD/MM/YYYY"),
+            "data_fim": st.column_config.DateColumn("Fim", format="DD/MM/YYYY"),
+            "status": st.column_config.SelectboxColumn(
+                "Status",
+                options=["Planejado", "Confirmado", "Executado", "Cancelado"]
+            )
+        },
+        use_container_width=True,
+        hide_index=True
+    )
+
+    if st.button("💾 Salvar Alterações", type="primary"):
+        # --- Validação: Duplicidade de Veículo ---
+        # Lógica simplificada: Verifica se há sobreposição de datas para o mesmo veículo
+        tem_erro = False
         
-        return opcoes_obras, opcoes_frota
+        # Converte para datetime para garantir comparação
+        df_editado['data_inicio'] = pd.to_datetime(df_editado['data_inicio'])
+        df_editado['data_fim'] = pd.to_datetime(df_editado['data_fim'])
 
-    lista_obras, lista_frota = load_options()
-
-    # --- EDITOR ---
-    try:
-        # Lê a Agenda (do secrets)
-        df_agenda = conn.read(worksheet="Agenda")
-        
-        if not df_agenda.empty:
-            df_agenda["Data_Inicio"] = pd.to_datetime(df_agenda["Data_Inicio"], errors='coerce')
-            df_agenda["Data_Fim"] = pd.to_datetime(df_agenda["Data_Fim"], errors='coerce')
-            df_agenda["Orcamento"] = df_agenda["Orcamento"].astype(str)
-
-        edited_df = st.data_editor(
-            df_agenda,
-            num_rows="dynamic",
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "ID": st.column_config.TextColumn("ID", disabled=True),
-                
-                "Orcamento": st.column_config.SelectboxColumn(
-                    "Obra", 
-                    options=lista_obras, 
-                    width="large", 
-                    required=True
-                ),
-                
-                "Equipe": st.column_config.TextColumn("Equipe", width="medium"),
-                
-                "Veiculo": st.column_config.SelectboxColumn(
-                    "Veículo", 
-                    options=lista_frota, 
-                    width="medium", 
-                    required=True
-                ),
-                
-                "Data_Inicio": st.column_config.DateColumn("Início", format="DD/MM/YYYY", step=1),
-                "Data_Fim": st.column_config.DateColumn("Fim", format="DD/MM/YYYY", step=1),
-            }
-        )
-
-        if st.button("💾 Salvar Alterações", type="primary"):
-            # Validação
-            if not edited_df.empty and edited_df.duplicated(subset=['Veiculo', 'Data_Inicio']).any():
-                st.warning("⚠️ Atenção: Veículos duplicados na mesma data!")
+        # Loop simples de validação (pode ser otimizado para grandes volumes)
+        for veiculo in df_editado['veiculo'].unique():
+            df_v = df_editado[df_editado['veiculo'] == veiculo]
+            df_v = df_v.sort_values('data_inicio')
             
-            # Salvar
-            df_save = edited_df.copy()
-            df_save["Data_Inicio"] = df_save["Data_Inicio"].dt.strftime('%Y-%m-%d')
-            df_save["Data_Fim"] = df_save["Data_Fim"].dt.strftime('%Y-%m-%d')
-            
-            conn.update(worksheet="Agenda", data=df_save)
-            st.success("✅ Salvo com sucesso!")
-            
-    except Exception as e:
-        st.error(f"Erro no editor: {e}")
+            # Checa sobreposição
+            # Shift das datas para comparar linha atual com a anterior
+            if not df_v.empty and len(df_v) > 1:
+                # Lógica: Se o início da atual for menor que o fim da anterior
+                # (Isso é uma simplificação, idealmente checa range overlap completo)
+                pass 
+                # IMPLEMENTAR: Verificação robusta de overlap de datas aqui se necessário.
+                
+                # Exemplo de validação simples (mesmo dia, mesmo carro)
+                duplicados = df_v[df_v.duplicated(subset=['data_inicio'], keep=False)]
+                if not duplicados.empty:
+                    st.error(f"Conflito de agendamento para o veículo {veiculo} na mesma data de início!")
+                    tem_erro = True
+                    break
+
+        if not tem_erro:
+            try:
+                with st.spinner("Salvando no Google Sheets..."):
+                    # Converte datas de volta para string formato ISO ou BR antes de enviar, se necessário
+                    df_salvar = df_editado.copy()
+                    df_salvar['data_inicio'] = df_salvar['data_inicio'].astype(str)
+                    df_salvar['data_fim'] = df_salvar['data_fim'].astype(str)
+                    
+                    conexao.salvar_no_sheets(df_salvar)
+                st.success("Sucesso! Planilha atualizada.")
+                st.cache_data.clear() # Garante que o refresh funcione
+            except Exception as e:
+                st.error(f"Erro ao salvar: {e}")
