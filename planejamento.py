@@ -21,18 +21,11 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     desc_auto = ""
     cliente_auto = ""
     if projeto_selecionado:
-        # Filtra os dados do projeto
+        # Filtra e pega a primeira linha
         dados = df_obras[df_obras['Projeto'] == projeto_selecionado].iloc[0]
         
-        # --- CORREÇÃO DA DESCRIÇÃO ---
-        # Tenta buscar 'descricao', se não achar tenta 'Descrição', se não achar fica vazio.
-        if 'descricao' in dados:
-            desc_auto = dados['descricao']
-        elif 'Descrição' in dados:
-            desc_auto = dados['Descrição']
-        else:
-            desc_auto = ""
-            
+        # --- CORREÇÃO 1: Coluna "Descricao" (Exata) ---
+        desc_auto = dados.get('Descricao', "") 
         cliente_auto = f"{dados.get('Cliente', '')} - {dados.get('Cidade', '')}"
 
     descricao = st.text_input("Descrição", value=desc_auto, disabled=True) 
@@ -96,20 +89,26 @@ def app():
         st.info("Nenhum agendamento.")
         return
 
-    # 1. Tratamento de Datas
+    # 1. Tratamento de Dados
     try:
+        # Datas
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], dayfirst=True, errors='coerce')
+        
+        # --- CORREÇÃO 2: Forçar Projeto como TEXTO (String) ---
+        # Isso impede que o Plotly ache que é número e corte o eixo
+        df_agenda['Projeto'] = df_agenda['Projeto'].astype(str)
+        
         df_processado = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
-    except:
-        st.error("Erro nas datas.")
+    except Exception as e:
+        st.error(f"Erro ao processar dados: {e}")
         return
 
     if df_processado.empty:
         st.warning("Sem dados válidos.")
         return
 
-    # 2. Filtros
+    # 2. Filtros (Padrão: Pega TUDO, do mais antigo ao mais novo)
     min_date = df_processado['Data Início'].min().date()
     max_date = df_processado['Data Fim'].max().date()
     
@@ -124,16 +123,12 @@ def app():
 
     # 3. O GRÁFICO GANTT
     if not df_filtrado.empty:
-        # Ordena para o gráfico ficar bonito (agrupa projetos iguais)
-        df_filtrado = df_filtrado.sort_values(by=['Projeto', 'Data Início'])
+        # Ordena: Primeiro pelo Projeto (alfabético), depois pela Data
+        df_filtrado = df_filtrado.sort_values(by=['Projeto', 'Data Início'], ascending=[True, True])
         
-        # --- CÁLCULO DE ALTURA CORRIGIDO ---
-        # Conta quantos projetos ÚNICOS existem para definir a altura
-        # Isso evita que o gráfico corte se houver muitos projetos
+        # Cálculo de Altura: Conta Projetos ÚNICOS para dar espaço vertical
         qtd_projetos_unicos = len(df_filtrado['Projeto'].unique())
-        
-        # Altura mínima de 300px + 50px por projeto
-        altura_grafico = max(300, qtd_projetos_unicos * 50) 
+        altura_grafico = max(400, qtd_projetos_unicos * 50) # Mínimo 400px, aumenta 50px por projeto
 
         fig = px.timeline(
             df_filtrado, 
@@ -146,7 +141,6 @@ def app():
             hover_data=["Cliente", "Veículo", "Executantes"]
         )
 
-        # Configurações Visuais
         fig.update_layout(
             xaxis=dict(
                 title="",
@@ -156,19 +150,18 @@ def app():
                 showgrid=True
             ),
             yaxis=dict(
-                title="", 
-                autorange="reversed", 
+                title=None,           # --- CORREÇÃO 3: Remove legenda do eixo Y ("Projeto")
+                autorange="reversed", # Ordem correta (A-Z de cima para baixo)
                 showgrid=True,
                 gridcolor='#e0e0e0',
-                automargin=True # Garante que os nomes longos não sejam cortados
+                automargin=True,      # Garante espaço para ler o nome do projeto
+                type='category'       # --- CORREÇÃO 4: Força Eixo Categórico (Mostra TODOS os itens)
             ),
             plot_bgcolor='white',
             margin=dict(t=40, b=20, l=10, r=10),
             showlegend=True,
-            legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="right", x=1),
-            
-            # --- BARRAS MAIS FINAS ---
-            bargap=0.4 # Aumente este valor (0.1 a 0.9) para afinar as barras (0.4 é médio-fino)
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            bargap=0.2 
         )
 
         fig.update_traces(
@@ -183,7 +176,7 @@ def app():
 
         st.divider()
         
-        # Tabela Simples
+        # Tabela
         df_exibicao = df_filtrado.copy()
         df_exibicao["Data Início"] = df_exibicao["Data Início"].dt.date
         df_exibicao["Data Fim"] = df_exibicao["Data Fim"].dt.date
