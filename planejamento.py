@@ -5,7 +5,7 @@ import conexao
 from datetime import datetime, timedelta
 import calendar
 
-# --- Função Auxiliar: Datas Padrão (Para o Modal) ---
+# --- Função Auxiliar: Datas Padrão ---
 def get_proxima_semana():
     hoje = datetime.now().date()
     dias_para_segunda = 7 - hoje.weekday()
@@ -144,9 +144,7 @@ def app():
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
     # --- FILTROS MANUAIS ---
-    # Padrão: HOJE até +30 dias
     padrao_inicio = datetime.today().date()
-    # Garante limite superior
     max_data = df_processado['Data Fim'].max().date()
     padrao_fim = max(padrao_inicio + timedelta(days=30), max_data)
 
@@ -191,10 +189,14 @@ def app():
                 line=dict(color=df_filtrado['CorLine'], width=1),
                 cornerradius=5
             ),
+            # --- PONTO 3: Texto fixo ---
             textposition='inside', 
             insidetextanchor='start',
             textfont=dict(color='white', weight='bold', size=13),
-            constraintext='none'
+            
+            # constraintext='none' -> Impede que o texto encolha. 
+            # Se não couber, ele vaza para a direita (fora da barra), mantendo o tamanho.
+            constraintext='none' 
         )
 
         fig.update_layout(
@@ -202,10 +204,12 @@ def app():
             plot_bgcolor='rgba(0,0,0,0)',
             font=dict(color="white", family="sans-serif"),
             
-            # Eixo X
+            # --- PONTO 4: Arrastar para Mover (Pan) ---
+            dragmode="pan", # Agora o padrão é mover, não dar zoom
+            
             xaxis=dict(
                 title=None,
-                tickformat="%d/%m", # Ex: 01/02
+                tickformat="%d/%m", 
                 side="top",         
                 showgrid=True,
                 gridcolor='#333333',
@@ -230,21 +234,27 @@ def app():
             bargap=0.3
         )
 
-        # --- LINHA DO "HOJE" ---
-        fig.add_vline(x=datetime.today(), line_width=2, line_color="#FF4500", opacity=1)
+        # --- PONTO 1: LINHA DO "HOJE" (AZUL NEON) ---
+        fig.add_vline(
+            x=datetime.today(), 
+            line_width=3, 
+            line_color="#00FFFF", # Ciano Neon (Destaque total)
+            line_dash="dot",      # Pontilhado para diferenciar das barras sólidas
+            opacity=1
+        )
         fig.add_annotation(
             x=datetime.today(), y=1, 
             yref="paper", text="HOJE", 
             showarrow=False, 
-            font=dict(color="#FF4500", weight="bold"),
+            font=dict(color="#00FFFF", weight="bold"), # Texto também neon
             yshift=10
         )
 
-        # --- LOOP PARA FIM DE SEMANA E SEPARADOR DE MÊS ---
+        # --- LOOP DIÁRIO ---
         curr_date = inicio
         
         while curr_date <= fim:
-            # 1. Final de Semana (Fundo leve)
+            # Fim de Semana
             if curr_date.weekday() in [5, 6]: 
                 fig.add_vrect(
                     x0=curr_date, 
@@ -255,19 +265,17 @@ def app():
                     line_width=0
                 )
             
-            # 2. SEPARADOR DE MÊS (Dia 01)
+            # --- PONTO 2: SEPARADOR DE MÊS (MAIS GROSSO) ---
             if curr_date.day == 1:
-                # Linha
                 fig.add_vline(
                     x=curr_date, 
-                    line_width=2, 
-                    line_color="#FFFFFF", # Branca Sólida
-                    opacity=0.6
+                    line_width=3,         # Aumentei para 3px
+                    line_color="#FFFFFF", 
+                    opacity=0.8           # Mais visível
                 )
-                # Texto do Mês
                 fig.add_annotation(
                     x=curr_date, y=0, yref="paper",
-                    text=f"{curr_date.strftime('%b').upper()}", # JAN, FEV
+                    text=f"{curr_date.strftime('%b').upper()}", 
                     showarrow=False,
                     font=dict(color="#FFFFFF", size=14, weight="bold"), 
                     yshift=-30
