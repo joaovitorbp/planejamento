@@ -21,10 +21,10 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     desc_auto = ""
     cliente_auto = ""
     if projeto_selecionado:
-        # Filtra e pega a primeira linha
+        # Filtra dados
         dados = df_obras[df_obras['Projeto'] == projeto_selecionado].iloc[0]
         
-        # --- CORREÇÃO 1: Coluna "Descricao" (Exata) ---
+        # Busca Descrição
         desc_auto = dados.get('Descricao', "") 
         cliente_auto = f"{dados.get('Cliente', '')} - {dados.get('Cidade', '')}"
 
@@ -63,9 +63,12 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
                 df_final = pd.concat([df_agenda_atual, nova_linha], ignore_index=True)
 
             try:
-                # Sanitização de Datas
+                # Sanitização de Datas (Garante ISO YYYY-MM-DD para o Google Sheets)
+                # O problema do "flip" geralmente não é na escrita (aqui), mas na leitura.
+                # Mas aqui garantimos que suba padronizado.
                 df_final['Data Início'] = pd.to_datetime(df_final['Data Início'], dayfirst=True).dt.strftime('%Y-%m-%d')
                 df_final['Data Fim'] = pd.to_datetime(df_final['Data Fim'], dayfirst=True).dt.strftime('%Y-%m-%d')
+                
                 df_final = df_final.fillna("")
                 conexao.salvar_no_sheets(df_final)
                 st.success("Salvo!")
@@ -76,7 +79,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
 # --- App Principal ---
 def app():
     col1, col2 = st.columns([3, 1])
-    col1.header("📅 Gráfico de Gantt")
+    col1.header("📅 Cronograma de Obras")
 
     with st.spinner("Lendo dados..."):
         df_agenda, df_frota, df_time, df_obras = conexao.carregar_dados()
@@ -89,14 +92,14 @@ def app():
         st.info("Nenhum agendamento.")
         return
 
-    # 1. Tratamento de Dados
+    # 1. Tratamento de Dados (CORREÇÃO DO BUG DA DATA)
     try:
-        # Datas
-        df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], dayfirst=True, errors='coerce')
-        df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], dayfirst=True, errors='coerce')
+        # CORREÇÃO CRÍTICA: format='mixed' + dayfirst=True
+        # Isso força o Pandas a tentar ler DD/MM/YYYY primeiro, resolvendo a inversão 02/09 -> 09/02
+        df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
+        df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
         
-        # --- CORREÇÃO 2: Forçar Projeto como TEXTO (String) ---
-        # Isso impede que o Plotly ache que é número e corte o eixo
+        # Garante que Projeto seja texto para não bugar o eixo Y
         df_agenda['Projeto'] = df_agenda['Projeto'].astype(str)
         
         df_processado = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
@@ -108,7 +111,7 @@ def app():
         st.warning("Sem dados válidos.")
         return
 
-    # 2. Filtros (Padrão: Pega TUDO, do mais antigo ao mais novo)
+    # 2. Filtros
     min_date = df_processado['Data Início'].min().date()
     max_date = df_processado['Data Fim'].max().date()
     
@@ -123,12 +126,12 @@ def app():
 
     # 3. O GRÁFICO GANTT
     if not df_filtrado.empty:
-        # Ordena: Primeiro pelo Projeto (alfabético), depois pela Data
+        # Ordenação
         df_filtrado = df_filtrado.sort_values(by=['Projeto', 'Data Início'], ascending=[True, True])
         
-        # Cálculo de Altura: Conta Projetos ÚNICOS para dar espaço vertical
+        # Altura dinâmica
         qtd_projetos_unicos = len(df_filtrado['Projeto'].unique())
-        altura_grafico = max(400, qtd_projetos_unicos * 50) # Mínimo 400px, aumenta 50px por projeto
+        altura_grafico = max(400, qtd_projetos_unicos * 50)
 
         fig = px.timeline(
             df_filtrado, 
@@ -150,12 +153,12 @@ def app():
                 showgrid=True
             ),
             yaxis=dict(
-                title=None,           # --- CORREÇÃO 3: Remove legenda do eixo Y ("Projeto")
-                autorange="reversed", # Ordem correta (A-Z de cima para baixo)
+                title=None,           # Tira o título do Eixo Y
+                autorange="reversed", 
                 showgrid=True,
                 gridcolor='#e0e0e0',
-                automargin=True,      # Garante espaço para ler o nome do projeto
-                type='category'       # --- CORREÇÃO 4: Força Eixo Categórico (Mostra TODOS os itens)
+                automargin=True,
+                type='category'       # Garante que mostre todos os projetos
             ),
             plot_bgcolor='white',
             margin=dict(t=40, b=20, l=10, r=10),
