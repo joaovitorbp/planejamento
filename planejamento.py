@@ -15,23 +15,21 @@ def get_proxima_semana():
 # --- Função Auxiliar: Situação e Cores ---
 def calcular_situacao_e_cores(row):
     hoje = datetime.now().date()
-    # Converte com segurança
     inicio = pd.to_datetime(row['Data Início']).date()
     fim = pd.to_datetime(row['Data Fim']).date()
     
-    # Lógica de Cores
     if inicio > hoje:
         situacao = "Não Iniciada"
         cor_fill = "#EF4444"  # Vermelho
-        cor_line = "#7F1D1D"  # Vermelho Escuro (Borda)
+        cor_line = "#7F1D1D"  # Borda Escura
     elif fim < hoje:
         situacao = "Concluída"
         cor_fill = "#10B981"  # Verde
-        cor_line = "#064E3B"  # Verde Escuro (Borda)
+        cor_line = "#064E3B"  # Borda Escura
     else:
         situacao = "Em Andamento"
         cor_fill = "#F59E0B"  # Amarelo
-        cor_line = "#78350F"  # Marrom (Borda)
+        cor_line = "#78350F"  # Borda Escura
         
     return pd.Series([situacao, cor_fill, cor_line])
 
@@ -52,10 +50,8 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     if projeto_selecionado:
         df_obras['Projeto'] = df_obras['Projeto'].astype(str)
         dados = df_obras[df_obras['Projeto'] == str(projeto_selecionado)].iloc[0]
-        
         if 'Descricao' in dados: desc_auto = dados['Descricao']
         elif 'Descrição' in dados: desc_auto = dados['Descrição']
-        
         cliente_auto = f"{dados.get('Cliente', '')} - {dados.get('Cidade', '')}"
 
     descricao = st.text_input("Descrição", value=desc_auto, disabled=True) 
@@ -73,9 +69,21 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     veiculo = st.selectbox("Veículo (Opcional)", options=lista_veiculos, index=None, placeholder="Selecione...")
 
     if st.button("Salvar", type="primary"):
+        # --- VALIDAÇÃO OBRIGATÓRIA (Ponto 2) ---
+        erros = []
         if not projeto_selecionado:
-            st.error("Selecione um projeto.")
+            erros.append("Projeto")
+        if not executantes:
+            erros.append("Executantes")
+        if not data_inicio:
+            erros.append("Data Início")
+        if not data_fim:
+            erros.append("Data Fim")
+
+        if erros:
+            st.error(f"Campos obrigatórios faltando: {', '.join(erros)}")
             return
+        # ---------------------------------------
 
         with st.spinner("Salvando..."):
             nova_linha = pd.DataFrame([{
@@ -112,8 +120,6 @@ def app():
 
     df_raw, df_frota, df_time, df_obras_raw = conexao.carregar_dados()
     df_agenda = df_raw.copy()
-    
-    # Tratamento Inicial das Obras
     df_obras = df_obras_raw.copy()
 
     with col2:
@@ -124,15 +130,11 @@ def app():
         st.info("Nenhum agendamento.")
         return
 
-    # 1. Tratamento de Dados
+    # Tratamento de Dados
     try:
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
-        
-        # PONTO CRÍTICO: Forçar texto no Projeto para não bugar formato
-        df_agenda['Projeto'] = df_agenda['Projeto'].astype(str)
-        df_agenda['Projeto'] = df_agenda['Projeto'].apply(lambda x: x.replace('.0', '') if x.endswith('.0') else x)
-
+        df_agenda['Projeto'] = df_agenda['Projeto'].astype(str).apply(lambda x: x.replace('.0', '') if x.endswith('.0') else x)
         df_processado = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
     except Exception as e:
         st.error(f"Erro ao processar dados: {e}")
@@ -142,10 +144,10 @@ def app():
         st.warning("Sem dados válidos.")
         return
 
-    # 2. Aplica Cores
+    # Cores
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
-    # 3. Filtros
+    # Filtros
     min_global = df_processado['Data Início'].min().date()
     max_global = df_processado['Data Fim'].max().date()
     
@@ -164,12 +166,9 @@ def app():
     
     df_filtrado = df_processado.loc[mask]
 
-    # 4. GRÁFICO
     if not df_filtrado.empty:
-        # Ordenação
         df_filtrado = df_filtrado.sort_values(by=['Data Início', 'Projeto'])
         
-        # Altura dinâmica
         qtd_projetos = len(df_filtrado['Projeto'].unique())
         altura = max(300, qtd_projetos * 50)
 
@@ -181,29 +180,21 @@ def app():
             text="Projeto", 
             height=altura,
             hover_data={
-                "Projeto": True, 
-                "Descrição": True,
-                "Cliente": True,
-                "Executantes": True,
-                "Situacao": True, 
-                "CorFill": False, 
-                "CorLine": False
+                "Projeto": True, "Descrição": True, "Cliente": True,
+                "Executantes": True, "Situacao": True, "CorFill": False, "CorLine": False
             }
         )
 
         fig.update_traces(
             marker=dict(
                 color=df_filtrado['CorFill'],
-                line=dict(
-                    color=df_filtrado['CorLine'],
-                    width=1 # Borda fina
-                ),
+                line=dict(color=df_filtrado['CorLine'], width=1),
                 cornerradius=5
             ),
             textposition='inside', 
             insidetextanchor='start',
             textfont=dict(color='white', weight='bold', size=13),
-            constraintext='none' 
+            constraintext='none'
         )
 
         fig.update_layout(
@@ -211,18 +202,33 @@ def app():
             plot_bgcolor='rgba(0,0,0,0)',
             font=dict(color="white", family="sans-serif"),
             
-            # --- EIXO X ---
+            # --- EIXO X DUPLO (Ponto 1) ---
+            
+            # 1. Eixo de Dias (Baixo)
             xaxis=dict(
                 title=None,
-                tickformat="%d/%m<br>%a", 
+                tickformat="%d", # Apenas o dia (01, 02...)
                 side="top",         
                 showgrid=True,
                 gridcolor='#333333',
                 dtick=86400000.0, # 1 dia exato
-                ticklabelmode="period", # Texto centralizado no dia
+                ticklabelmode="period", # Centraliza
                 range=[inicio, fim],
                 tickcolor='white',
                 tickfont=dict(color='#cccccc', size=12)
+            ),
+            
+            # 2. Eixo de Meses (Overlay - Fica em cima)
+            xaxis2=dict(
+                title=None,
+                overlaying="x", # Sobrepõe o eixo X original
+                side="top",     # Fica no topo também
+                tickformat="%B %Y", # Janeiro 2026
+                dtick="M1",         # 1 tick por mês
+                showgrid=False,     # Sem grade extra para não poluir
+                range=[inicio, fim], # Sincroniza o range
+                tickfont=dict(color='#ffffff', size=14, weight="bold"),
+                position=1 # Joga um pouco mais pra cima se precisar (mas side top já resolve)
             ),
             
             yaxis=dict(
@@ -234,23 +240,22 @@ def app():
                 type='category'
             ),
             
-            margin=dict(t=60, b=10, l=0, r=0),
+            # Aumentei a margem superior para caber Meses + Dias
+            margin=dict(t=80, b=10, l=0, r=0),
             showlegend=False,
             bargap=0.3
         )
 
-        # --- FINAIS DE SEMANA (SÁBADO e DOMINGO) ---
-        # Adiciona fundo mais claro (branco com transparência)
+        # Finais de Semana
         curr_date = inicio
         while curr_date <= fim:
-            # 5 = Sábado, 6 = Domingo
             if curr_date.weekday() in [5, 6]:
                 fig.add_vrect(
                     x0=curr_date, 
                     x1=curr_date + timedelta(days=1), 
-                    fillcolor="white", # <--- Cor clara
-                    opacity=0.08,      # <--- Transparência bem suave
-                    layer="below",     # Fica atrás das barras
+                    fillcolor="white", 
+                    opacity=0.08, 
+                    layer="below", 
                     line_width=0
                 )
             curr_date += timedelta(days=1)
