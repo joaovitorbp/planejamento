@@ -4,7 +4,7 @@ import pandas as pd
 import conexao
 from datetime import datetime, timedelta
 
-# --- Função Auxiliar: Datas Padrão (Próxima Semana) ---
+# --- Função Auxiliar: Datas Padrão ---
 def get_proxima_semana():
     hoje = datetime.now().date()
     dias_para_segunda = 7 - hoje.weekday()
@@ -12,30 +12,26 @@ def get_proxima_semana():
     proxima_sexta = proxima_segunda + timedelta(days=4)
     return proxima_segunda, proxima_sexta
 
-# --- Função Auxiliar: Definir Situação e Cores (Preenchimento e Borda) ---
+# --- Função Auxiliar: Situação e Cores ---
 def calcular_situacao_e_cores(row):
     hoje = datetime.now().date()
-    # Garante conversão segura para date
+    # Converte com segurança
     inicio = pd.to_datetime(row['Data Início']).date()
     fim = pd.to_datetime(row['Data Fim']).date()
-
-    # Lógica pedida:
-    # Inicio > Hoje (Futuro) -> Vermelho
-    # Termino < Hoje (Passado) -> Verde
-    # Inicio <= Hoje <= Termino (Presente) -> Amarelo
     
+    # Lógica de Cores
     if inicio > hoje:
         situacao = "Não Iniciada"
-        cor_fill = "#EF4444"  # Vermelho Fosco
+        cor_fill = "#EF4444"  # Vermelho
         cor_line = "#7F1D1D"  # Vermelho Escuro (Borda)
     elif fim < hoje:
         situacao = "Concluída"
-        cor_fill = "#10B981"  # Verde Esmeralda
+        cor_fill = "#10B981"  # Verde
         cor_line = "#064E3B"  # Verde Escuro (Borda)
     else:
         situacao = "Em Andamento"
-        cor_fill = "#F59E0B"  # Amarelo/Laranja
-        cor_line = "#78350F"  # Marrom/Laranja Escuro (Borda)
+        cor_fill = "#F59E0B"  # Amarelo
+        cor_line = "#78350F"  # Marrom (Borda)
         
     return pd.Series([situacao, cor_fill, cor_line])
 
@@ -44,7 +40,7 @@ def calcular_situacao_e_cores(row):
 def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     st.write("Novo Agendamento")
 
-    # Listas
+    # Garante que listas sejam Strings para evitar erro de float
     lista_projetos = df_obras['Projeto'].astype(str).dropna().unique().tolist() if 'Projeto' in df_obras.columns else []
     lista_time = df_time['Nome'].dropna().unique().tolist() if not df_time.empty and 'Nome' in df_time.columns else []
     col_veic = 'Veículo' if 'Veículo' in df_frota.columns else 'Placa'
@@ -55,10 +51,14 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     desc_auto = ""
     cliente_auto = ""
     if projeto_selecionado:
-        # Filtra como string para evitar erro
+        # Filtra como string
         df_obras['Projeto'] = df_obras['Projeto'].astype(str)
         dados = df_obras[df_obras['Projeto'] == str(projeto_selecionado)].iloc[0]
-        desc_auto = dados.get('Descricao', "") 
+        
+        # Busca descrição e cliente
+        if 'Descricao' in dados: desc_auto = dados['Descricao']
+        elif 'Descrição' in dados: desc_auto = dados['Descrição']
+        
         cliente_auto = f"{dados.get('Cliente', '')} - {dados.get('Cidade', '')}"
 
     descricao = st.text_input("Descrição", value=desc_auto, disabled=True) 
@@ -82,7 +82,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
 
         with st.spinner("Salvando..."):
             nova_linha = pd.DataFrame([{
-                "Projeto": str(projeto_selecionado), # Força String
+                "Projeto": str(projeto_selecionado),
                 "Descrição": descricao,
                 "Cliente": cliente,
                 "Data Início": data_inicio.strftime('%Y-%m-%d'),
@@ -102,7 +102,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
                 df_final['Data Fim'] = pd.to_datetime(df_final['Data Fim'], dayfirst=True).dt.strftime('%Y-%m-%d')
                 df_final = df_final.fillna("")
                 conexao.salvar_no_sheets(df_final)
-                st.cache_data.clear() # Limpa cache para forçar atualização
+                st.cache_data.clear()
                 st.success("Salvo!")
                 st.rerun()
             except Exception as e:
@@ -113,9 +113,10 @@ def app():
     col1, col2 = st.columns([3, 1])
     col1.header("📅 Cronograma")
 
-    # Carrega dados e CRIA CÓPIA para evitar problema de cache
     df_raw, df_frota, df_time, df_obras_raw = conexao.carregar_dados()
     df_agenda = df_raw.copy()
+    
+    # Tratamento Inicial das Obras (Para garantir que Descrição venha certa)
     df_obras = df_obras_raw.copy()
 
     with col2:
@@ -126,15 +127,16 @@ def app():
         st.info("Nenhum agendamento.")
         return
 
-    # 1. Tratamento de Dados (Forçar Tipos)
+    # 1. Tratamento de Dados
     try:
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
         
-        # Converte Projeto para String (Remove .0 se vier do Excel como float)
-        # Ex: 1001.0 -> "1001" | "1001.2002" -> "1001.2002"
-        df_agenda['Projeto'] = df_agenda['Projeto'].astype(str).str.replace(r'\.0$', '', regex=True)
-        
+        # PONTO 1: Tratamento de String Robusto para XXXX.XXXX
+        df_agenda['Projeto'] = df_agenda['Projeto'].astype(str)
+        # Remove sufixo .0 apenas se estiver no fim (para casos 1001.0 -> 1001, mas mantendo 1001.2024)
+        df_agenda['Projeto'] = df_agenda['Projeto'].apply(lambda x: x.replace('.0', '') if x.endswith('.0') else x)
+
         df_processado = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
     except Exception as e:
         st.error(f"Erro ao processar dados: {e}")
@@ -144,65 +146,73 @@ def app():
         st.warning("Sem dados válidos.")
         return
 
-    # 2. Aplica a Lógica de Cores e Situação
-    # Cria 3 colunas novas: Situacao, CorFill, CorLine
+    # 2. Aplica Cores
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
-    # 3. Filtros
-    min_date = df_processado['Data Início'].min().date()
-    max_date = df_processado['Data Fim'].max().date()
+    # 3. Filtros e Controle de Tempo (PONTO 3)
+    # Pega datas min/max globais para sugestão, mas o input controla o gráfico
+    min_global = df_processado['Data Início'].min().date()
+    max_global = df_processado['Data Fim'].max().date()
     
-    c_ini, c_fim, c_filtro = st.columns([1, 1, 2])
-    with c_ini:
-        inicio = st.date_input("De:", value=min_date, format="DD/MM/YYYY")
-    with c_fim:
-        fim = st.date_input("Até:", value=max_date, format="DD/MM/YYYY")
-    with c_filtro:
-        situacoes_disponiveis = ["Não Iniciada", "Em Andamento", "Concluída"]
-        filtro_situacao = st.multiselect("Filtrar Situação:", situacoes_disponiveis, default=situacoes_disponiveis)
+    f1, f2, f3 = st.columns([1, 1, 2])
+    with f1:
+        inicio = st.date_input("De:", value=min_global, format="DD/MM/YYYY")
+    with f2:
+        fim = st.date_input("Até:", value=max_global, format="DD/MM/YYYY")
+    with f3:
+        situacoes_padrao = ["Não Iniciada", "Em Andamento", "Concluída"]
+        filtro_situacao = st.multiselect("Filtrar Situação:", situacoes_padrao, default=situacoes_padrao)
 
-    # Aplica Filtros
+    # Filtragem
     mask = (df_processado['Data Início'].dt.date >= inicio) & \
            (df_processado['Data Fim'].dt.date <= fim) & \
            (df_processado['Situacao'].isin(filtro_situacao))
     
     df_filtrado = df_processado.loc[mask]
 
-    # 4. GRÁFICO FINAL
+    # 4. GRÁFICO
     if not df_filtrado.empty:
         # Ordenação
         df_filtrado = df_filtrado.sort_values(by=['Data Início', 'Projeto'])
         
+        # Altura
         qtd_projetos = len(df_filtrado['Projeto'].unique())
         altura = max(300, qtd_projetos * 45)
 
-        # Como queremos cores específicas por LINHA (baseado na data) e não por categoria fixa,
-        # O jeito mais robusto no Plotly é passar a coluna de cor diretamente.
+        # PONTO 5: Hover Data Completo (Descrição, Cliente, Executantes)
+        # Precisamos garantir que essas colunas existem no dataframe
+        # Se vieram do agendamento, devem estar lá.
         
         fig = px.timeline(
             df_filtrado, 
             x_start="Data Início", 
             x_end="Data Fim", 
             y="Projeto",
-            text="Projeto",
+            text="Projeto", # Texto dentro da barra
             height=altura,
-            hover_data={"Projeto": False, "Situacao": True, "CorFill": False}
+            hover_data={
+                "Projeto": True, 
+                "Descrição": True,  # <--- PONTO 5
+                "Cliente": True,    # <--- PONTO 5
+                "Executantes": True,# <--- PONTO 5
+                "Situacao": True, 
+                "CorFill": False, 
+                "CorLine": False
+            }
         )
 
-        # APLICANDO AS CORES MANUALMENTE
-        # O Plotly Express as vezes briga com cores por linha, então atualizamos o trace direto.
         fig.update_traces(
             marker=dict(
-                color=df_filtrado['CorFill'], # Cor do preenchimento calculada
+                color=df_filtrado['CorFill'],
                 line=dict(
-                    color=df_filtrado['CorLine'], # Cor da borda calculada (mais escura)
-                    width=3 # Borda grossa para destaque
+                    color=df_filtrado['CorLine'],
+                    width=1 # <--- PONTO 2: Borda mais fina
                 ),
-                cornerradius=5 # Arredondamento
+                cornerradius=5
             ),
             textposition='inside', 
             insidetextanchor='start',
-            textfont=dict(color='white', weight='bold', size=14)
+            textfont=dict(color='white', weight='bold', size=13)
         )
 
         fig.update_layout(
@@ -210,15 +220,22 @@ def app():
             plot_bgcolor='rgba(0,0,0,0)',
             font=dict(color="white", family="sans-serif"),
             
+            # EIXO X (PONTO 4: Quebra de Linha e PONTO 3: Controle de Tempo)
             xaxis=dict(
                 title=None,
-                tickformat="%a %d/%m", # Seg 02/09
+                # Formato: %d/%m (quebra linha) %a (Dia Semana)
+                # Ex: 02/09 (embaixo) Wed
+                tickformat="%d/%m<br>%a", 
                 side="top",         
                 showgrid=True,
                 gridcolor='#333333',
                 dtick=86400000.0, # 1 dia exato
+                
+                # Força o range do gráfico a obedecer EXATAMENTE o filtro de data
+                range=[inicio - timedelta(days=1), fim + timedelta(days=1)],
+                
                 tickcolor='white',
-                tickfont=dict(color='#cccccc')
+                tickfont=dict(color='#cccccc', size=12)
             ),
             
             yaxis=dict(
@@ -230,7 +247,7 @@ def app():
                 type='category'
             ),
             
-            margin=dict(t=40, b=10, l=0, r=0),
+            margin=dict(t=60, b=10, l=0, r=0),
             showlegend=False,
             bargap=0.3
         )
@@ -238,10 +255,29 @@ def app():
         st.plotly_chart(fig, use_container_width=True)
         
         st.divider()
+        
+        # PONTO 6 e 7: Tabela Formatada
+        st.subheader("Detalhamento")
+        
+        # Seleciona colunas específicas se existirem
+        cols_tabela = ["Projeto", "Descrição", "Cliente", "Data Início", "Data Fim", "Executantes"]
+        # Verifica quais existem no DF para não dar erro
+        cols_finais = [c for c in cols_tabela if c in df_filtrado.columns]
+        
+        df_tabela = df_filtrado[cols_finais].copy()
+        
+        # Converte para date (remove hora) visualmente antes de jogar na tabela
+        df_tabela["Data Início"] = pd.to_datetime(df_tabela["Data Início"]).dt.date
+        df_tabela["Data Fim"] = pd.to_datetime(df_tabela["Data Fim"]).dt.date
+
         st.dataframe(
-            df_filtrado[["Projeto", "Data Início", "Data Fim", "Situacao", "Veículo"]], 
+            df_tabela,
             use_container_width=True, 
-            hide_index=True
+            hide_index=True,
+            column_config={
+                "Data Início": st.column_config.DateColumn("Início", format="DD/MM/YYYY"), # Padrão BR
+                "Data Fim": st.column_config.DateColumn("Fim", format="DD/MM/YYYY"),       # Padrão BR
+            }
         )
     else:
         st.info("Nenhuma atividade encontrada com os filtros selecionados.")
