@@ -23,7 +23,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     cliente_auto = ""
     if projeto_selecionado:
         dados = df_obras[df_obras['Projeto'] == projeto_selecionado].iloc[0]
-        # Correção da coluna 'descricao' (minúscula)
+        # Correção da coluna 'descricao' (minúscula conforme seu aviso)
         desc_auto = dados.get('descricao', "") 
         cliente_auto = f"{dados.get('Cliente', '')} - {dados.get('Cidade', '')}"
 
@@ -90,7 +90,6 @@ def app():
 
     # --- 1. Processamento ---
     try:
-        # Força leitura correta de dia/mês
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], dayfirst=True, errors='coerce')
         df_processado = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
@@ -102,13 +101,10 @@ def app():
         st.warning("Sem dados válidos.")
         return
 
-    # --- 2. Filtros (Padrão: Todo o período encontrado) ---
+    # --- 2. Filtros ---
     min_date = df_processado['Data Início'].min().date()
     max_date = df_processado['Data Fim'].max().date()
-    # Adiciona uma margem de segurança visual (5 dias antes e depois)
-    visual_min = min_date - pd.Timedelta(days=5)
-    visual_max = max_date + pd.Timedelta(days=5)
-
+    
     col1, col2 = st.columns(2)
     with col1:
         data_filtro_inicio = st.date_input("De:", value=min_date, format="DD/MM/YYYY")
@@ -119,7 +115,7 @@ def app():
            (df_processado['Data Fim'].dt.date <= data_filtro_fim)
     df_filtrado = df_processado.loc[mask]
 
-    # --- 3. Visualização "Estilo Gantt Nativo" ---
+    # --- 3. Visualização ---
     if not df_filtrado.empty:
         eixo_y = "Veículo"
         if "Veículo" not in df_filtrado.columns or df_filtrado["Veículo"].astype(str).str.strip().eq("").all():
@@ -128,7 +124,7 @@ def app():
         # Ordenação
         df_filtrado = df_filtrado.sort_values(by=[eixo_y, 'Data Início'])
         
-        # Cálculo de altura dinâmica (para não espremer as barras)
+        # Cálculo de altura dinâmica
         altura_dinamica = 300 + (len(df_filtrado) * 40)
 
         # Configura o Gráfico
@@ -138,45 +134,56 @@ def app():
             x_end="Data Fim", 
             y=eixo_y, 
             color="Status",
-            text="Projeto", # <--- ISSO COLOCA O NOME DENTRO DA BARRA
+            text="Projeto", 
             hover_data=["Cliente", "Executantes", "Descrição"],
             height=altura_dinamica
         )
 
-        # --- A "MAQUIAGEM" PROFISSIONAL ---
+        # Layout Limpo
         fig.update_layout(
-            plot_bgcolor='white',  # Fundo branco limpo
+            plot_bgcolor='white',
             xaxis=dict(
                 title="",
-                tickformat="%d/%m",   # Data BR no eixo X
-                tickmode="linear",    # Força aparecer todos os ticks se possível
-                dtick=86400000.0,     # Força grade de 1 dia (em milissegundos)
-                gridcolor='#eee',     # Grade cinza bem claro
+                tickformat="%d/%m",
+                tickmode="linear",
+                dtick=86400000.0,
+                gridcolor='#eee',
                 showgrid=True,
-                side="top"            # Datas no topo (igual Project/Excel)
+                side="top"
             ),
             yaxis=dict(title="", showgrid=True, gridcolor='#eee'),
             showlegend=True,
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
 
-        # Formatação das Barras
         fig.update_traces(
-            textposition='inside', # Texto dentro da barra
-            insidetextanchor='start', # Texto alinhado à esquerda
-            marker_line_width=0,    # Sem borda preta grossa
+            textposition='inside',
+            insidetextanchor='start',
+            marker_line_width=0,
             opacity=0.9
         )
 
-        # Adiciona Linha do "HOJE"
-        fig.add_vline(x=datetime.today(), line_width=2, line_dash="dash", line_color="red", annotation_text="Hoje")
+        # --- A CORREÇÃO DO ERRO ---
+        # 1. Adiciona a Linha (sem texto aqui para não travar)
+        fig.add_vline(x=datetime.today(), line_width=2, line_dash="dash", line_color="red")
+        
+        # 2. Adiciona o Texto "Hoje" separadamente no topo
+        fig.add_annotation(
+            x=datetime.today(),
+            y=1,
+            yref="paper",
+            text="Hoje",
+            showarrow=False,
+            font=dict(color="red"),
+            yshift=10
+        )
 
         fig.update_yaxes(autorange="reversed")
         st.plotly_chart(fig, use_container_width=True)
         
         st.divider()
         
-        # Tabela Detalhada Limpa
+        # Tabela Detalhada
         df_exibicao = df_filtrado.copy()
         df_exibicao["Data Início"] = df_exibicao["Data Início"].dt.date
         df_exibicao["Data Fim"] = df_exibicao["Data Fim"].dt.date
