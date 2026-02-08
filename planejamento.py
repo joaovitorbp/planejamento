@@ -21,8 +21,18 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     desc_auto = ""
     cliente_auto = ""
     if projeto_selecionado:
+        # Filtra os dados do projeto
         dados = df_obras[df_obras['Projeto'] == projeto_selecionado].iloc[0]
-        desc_auto = dados.get('descricao', "") 
+        
+        # --- CORREÇÃO DA DESCRIÇÃO ---
+        # Tenta buscar 'descricao', se não achar tenta 'Descrição', se não achar fica vazio.
+        if 'descricao' in dados:
+            desc_auto = dados['descricao']
+        elif 'Descrição' in dados:
+            desc_auto = dados['Descrição']
+        else:
+            desc_auto = ""
+            
         cliente_auto = f"{dados.get('Cliente', '')} - {dados.get('Cidade', '')}"
 
     descricao = st.text_input("Descrição", value=desc_auto, disabled=True) 
@@ -112,14 +122,18 @@ def app():
     mask = (df_processado['Data Início'].dt.date >= inicio) & (df_processado['Data Fim'].dt.date <= fim)
     df_filtrado = df_processado.loc[mask]
 
-    # 3. O GRÁFICO GANTT (Plotly)
+    # 3. O GRÁFICO GANTT
     if not df_filtrado.empty:
-        # Ordena para o gráfico ficar bonito
-        df_filtrado = df_filtrado.sort_values(by=['Data Início'])
+        # Ordena para o gráfico ficar bonito (agrupa projetos iguais)
+        df_filtrado = df_filtrado.sort_values(by=['Projeto', 'Data Início'])
         
-        # Altura dinâmica
-        qtd_projetos = len(df_filtrado)
-        altura_grafico = 300 + (qtd_projetos * 40)
+        # --- CÁLCULO DE ALTURA CORRIGIDO ---
+        # Conta quantos projetos ÚNICOS existem para definir a altura
+        # Isso evita que o gráfico corte se houver muitos projetos
+        qtd_projetos_unicos = len(df_filtrado['Projeto'].unique())
+        
+        # Altura mínima de 300px + 50px por projeto
+        altura_grafico = max(300, qtd_projetos_unicos * 50) 
 
         fig = px.timeline(
             df_filtrado, 
@@ -145,15 +159,18 @@ def app():
                 title="", 
                 autorange="reversed", 
                 showgrid=True,
-                gridcolor='#e0e0e0'
+                gridcolor='#e0e0e0',
+                automargin=True # Garante que os nomes longos não sejam cortados
             ),
             plot_bgcolor='white',
             margin=dict(t=40, b=20, l=10, r=10),
             showlegend=True,
-            legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="right", x=1)
+            legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="right", x=1),
+            
+            # --- BARRAS MAIS FINAS ---
+            bargap=0.4 # Aumente este valor (0.1 a 0.9) para afinar as barras (0.4 é médio-fino)
         )
 
-        # Texto dentro da barra
         fig.update_traces(
             textposition='inside', 
             insidetextanchor='start', 
