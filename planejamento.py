@@ -5,7 +5,7 @@ import conexao
 from datetime import datetime
 
 # --- Modal (Pop-up) de Agendamento ---
-# (Lógica mantida idêntica, pois funciona perfeitamente)
+# (Mantido igual - Lógica funcional)
 @st.dialog("Agendar Nova Atividade")
 def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     st.write("Novo Agendamento")
@@ -84,11 +84,11 @@ def app():
         st.info("Nenhum agendamento.")
         return
 
-    # 1. Tratamento de Dados (BLINDADO)
+    # 1. Tratamento de Dados
     try:
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
-        df_agenda['Projeto'] = df_agenda['Projeto'].astype(str) # Força texto
+        df_agenda['Projeto'] = df_agenda['Projeto'].astype(str)
         df_processado = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
     except Exception as e:
         st.error(f"Erro ao processar dados: {e}")
@@ -111,21 +111,21 @@ def app():
     mask = (df_processado['Data Início'].dt.date >= inicio) & (df_processado['Data Fim'].dt.date <= fim)
     df_filtrado = df_processado.loc[mask]
 
-    # 3. VISUALIZAÇÃO PROFISSIONAL
+    # 3. VISUAL DARK MODE MINIMALISTA
     if not df_filtrado.empty:
         # Ordenação
         df_filtrado = df_filtrado.sort_values(by=['Projeto', 'Data Início'], ascending=[True, True])
         
-        # Altura: Compacta mas legível
+        # Altura dinâmica
         qtd_projetos_unicos = len(df_filtrado['Projeto'].unique())
-        altura_grafico = max(350, qtd_projetos_unicos * 45)
+        altura_grafico = max(300, qtd_projetos_unicos * 40) # 40px por linha
 
-        # --- PALETA DE CORES MODERNA (Flat Design) ---
-        cores_status = {
-            "Planejado": "#3B82F6",  # Azul Moderno
-            "Confirmado": "#F59E0B", # Âmbar/Laranja Suave
-            "Executado": "#10B981",  # Verde Esmeralda
-            "Cancelado": "#EF4444"   # Vermelho Fosco
+        # Cores Vibrantes (Neon) para contrastar com fundo escuro
+        cores_dark_mode = {
+            "Planejado": "#00B4D8",  # Ciano Neon
+            "Confirmado": "#F77F00", # Laranja Vivo
+            "Executado": "#2D6A4F",  # Verde Escuro (mas visível)
+            "Cancelado": "#D62828"   # Vermelho Sangue
         }
 
         fig = px.timeline(
@@ -135,83 +135,58 @@ def app():
             y="Projeto",       
             color="Status",    
             text="Projeto",
-            color_discrete_map=cores_status, # Aplica as cores manuais
+            color_discrete_map=cores_dark_mode,
             height=altura_grafico,
-            # Customizando o Hover (tooltip) para ficar limpo
-            hover_data={
-                "Projeto": False, # Já está no eixo Y
-                "Data Início": "|%d/%m", # Formato curto
-                "Data Fim": "|%d/%m",
-                "Status": False, # Já está na cor
-                "Veículo": True,
-                "Executantes": True
-            }
+            hover_data={"Projeto":False, "Status":False} # Hover limpo
         )
 
-        # --- LAYOUT MINIMALISTA ---
         fig.update_layout(
-            # Fontes
-            font_family="Arial, sans-serif",
-            font_color="#333333",
-            title_font_size=18,
+            # Fundo Transparente (Pega a cor do seu Streamlit Dark)
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
             
-            # Eixo X (Datas)
+            # Fonte Global
+            font=dict(color="white", family="sans-serif"),
+            
+            # Eixo X (Datas) - A única coisa que sobra fora a barra
             xaxis=dict(
-                title="",
-                tickformat="%d/%b", # Dia/Mês (ex: 01/Fev)
-                tickfont=dict(size=12, color="#666"),
+                title=None,
+                tickformat="%d/%m", 
                 side="top",         
                 showgrid=True,
-                gridcolor='#F3F4F6', # Grade muito sutil
+                gridcolor='#333333', # Grade cinza chumbo bem sutil
                 gridwidth=1,
-                dtick="D1", # Grade diária (opcional, pode remover se ficar muito cheio)
-                showline=False,
-                ticks=""
+                tickcolor='white',
+                tickfont=dict(color='#cccccc', size=12) # Texto cinza claro
             ),
             
-            # Eixo Y (Projetos)
+            # Eixo Y (Projetos) - TOTALMENTE OCULTO
             yaxis=dict(
                 title=None,
                 autorange="reversed", 
-                showgrid=False, # Sem linhas horizontais para limpar
-                automargin=True,
-                type='category',
-                tickfont=dict(size=13, weight="bold", color="#111827") # Projetos em destaque
+                showgrid=False,
+                showticklabels=False, # <--- Remove os nomes da esquerda
+                visible=True, # Mantém eixo ativo para ordenação, mas invisível
+                type='category'
             ),
             
-            # Fundo e Margens
-            plot_bgcolor='white',
-            paper_bgcolor='white',
-            margin=dict(t=30, b=10, l=10, r=10),
-            
-            # Legenda Elegante
-            showlegend=True,
-            legend=dict(
-                orientation="h", 
-                yanchor="bottom", y=1.05, 
-                xanchor="left", x=0,
-                title=None, # Remove título da legenda
-                font=dict(size=12)
-            ),
-            
-            # Espaçamento das barras
-            bargap=0.3 # 0.3 dá um respiro bom entre as linhas
+            margin=dict(t=30, b=10, l=0, r=0), # Margem Zero nas laterais
+            showlegend=False, # <--- Remove Legenda
+            bargap=0.2
         )
 
-        # --- ESTILO DAS BARRAS ---
         fig.update_traces(
             textposition='inside', 
             insidetextanchor='start',
-            textfont=dict(color='white', size=12), # Texto branco para contraste
-            marker_line_width=0, # Remove borda preta (Flat design)
-            opacity=1.0
+            textfont=dict(color='white', weight='bold'), # Texto dentro da barra
+            marker_line_width=0,
+            opacity=1
         )
 
         st.plotly_chart(fig, use_container_width=True)
-        st.divider()
         
-        # Tabela Minimalista
-        st.markdown("### Detalhes")
+        # Tabela (Opcional, se quiser remover me avise, mantive pois é útil)
+        st.divider()
         df_exibicao = df_filtrado.copy()
         df_exibicao["Data Início"] = df_exibicao["Data Início"].dt.date
         df_exibicao["Data Fim"] = df_exibicao["Data Fim"].dt.date
@@ -219,15 +194,7 @@ def app():
         st.dataframe(
             df_exibicao[["Projeto", "Data Início", "Data Fim", "Veículo", "Status"]], 
             use_container_width=True, 
-            hide_index=True,
-            column_config={
-                "Data Início": st.column_config.DateColumn("Início", format="DD/MM/YYYY"),
-                "Data Fim": st.column_config.DateColumn("Fim", format="DD/MM/YYYY"),
-                "Status": st.column_config.Column(
-                    "Status",
-                    width="small"
-                )
-            }
+            hide_index=True
         )
     else:
-        st.info("Utilize os filtros acima ou cadastre um novo agendamento.")
+        st.info("Sem dados.")
