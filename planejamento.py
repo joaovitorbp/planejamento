@@ -3,6 +3,8 @@ import plotly.express as px
 import pandas as pd
 import conexao
 from datetime import datetime, timedelta
+import calendar
+from dateutil.relativedelta import relativedelta
 
 # --- Função Auxiliar: Datas Padrão ---
 def get_proxima_semana():
@@ -11,6 +13,25 @@ def get_proxima_semana():
     proxima_segunda = hoje + timedelta(days=dias_para_segunda)
     proxima_sexta = proxima_segunda + timedelta(days=4)
     return proxima_segunda, proxima_sexta
+
+# --- Função Auxiliar: Definir Filtros Rápidos ---
+def set_periodo(tipo):
+    hoje = datetime.now().date()
+    
+    if tipo == "mes_atual":
+        ultimo_dia = calendar.monthrange(hoje.year, hoje.month)[1]
+        st.session_state['filtro_ini'] = hoje.replace(day=1)
+        st.session_state['filtro_fim'] = hoje.replace(day=ultimo_dia)
+        
+    elif tipo == "prox_mes":
+        mes_que_vem = hoje + relativedelta(months=1)
+        ultimo_dia = calendar.monthrange(mes_que_vem.year, mes_que_vem.month)[1]
+        st.session_state['filtro_ini'] = mes_que_vem.replace(day=1)
+        st.session_state['filtro_fim'] = mes_que_vem.replace(day=ultimo_dia)
+        
+    elif tipo == "3_meses":
+        st.session_state['filtro_ini'] = hoje
+        st.session_state['filtro_fim'] = hoje + timedelta(days=90)
 
 # --- Função Auxiliar: Situação e Cores ---
 def calcular_situacao_e_cores(row):
@@ -72,7 +93,6 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     veiculo = st.selectbox("Veículo (Opcional)", options=lista_veiculos, index=None, placeholder="Selecione...")
 
     if st.button("Salvar", type="primary"):
-        # Validação Obrigatória
         erros = []
         if not projeto_selecionado: erros.append("Projeto")
         if not executantes: erros.append("Executantes")
@@ -143,16 +163,36 @@ def app():
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
-    # Filtros
-    padrao_inicio = datetime.today().date()
-    max_data = df_processado['Data Fim'].max().date()
-    padrao_fim = max(padrao_inicio + timedelta(days=30), max_data)
+    # --- INICIALIZAÇÃO DOS FILTROS (SESSION STATE) ---
+    if 'filtro_ini' not in st.session_state:
+        st.session_state['filtro_ini'] = datetime.today().date()
+    if 'filtro_fim' not in st.session_state:
+        # Padrão: 30 dias pra frente
+        st.session_state['filtro_fim'] = datetime.today().date() + timedelta(days=30)
 
+    # --- BOTÕES DE FILTRO RÁPIDO ---
+    st.markdown("### Visualização")
+    b1, b2, b3, space = st.columns([1, 1, 1, 3])
+    
+    if b1.button("📅 Mês Atual", use_container_width=True):
+        set_periodo("mes_atual")
+        st.rerun()
+    
+    if b2.button("➡️ Próx. Mês", use_container_width=True):
+        set_periodo("prox_mes")
+        st.rerun()
+        
+    if b3.button("📆 3 Meses", use_container_width=True):
+        set_periodo("3_meses")
+        st.rerun()
+
+    # --- INPUTS MANUAIS (CONECTADOS AO SESSION STATE) ---
     f1, f2, f3 = st.columns([1, 1, 2])
     with f1:
-        inicio = st.date_input("De:", value=padrao_inicio, format="DD/MM/YYYY")
+        # key='filtro_ini' conecta direto ao session_state
+        inicio = st.date_input("De:", key="filtro_ini", format="DD/MM/YYYY")
     with f2:
-        fim = st.date_input("Até:", value=padrao_fim, format="DD/MM/YYYY")
+        fim = st.date_input("Até:", key="filtro_fim", format="DD/MM/YYYY")
     with f3:
         situacoes = ["Não Iniciada", "Em Andamento", "Concluída"]
         filtro_situacao = st.multiselect("Filtrar Situação:", situacoes, default=situacoes)
@@ -199,17 +239,15 @@ def app():
             plot_bgcolor='rgba(0,0,0,0)',
             font=dict(color="white", family="sans-serif"),
             
-            # --- EIXO X LIMPO ---
             xaxis=dict(
                 title=None,
-                # Formato: 02/09 (linha de cima) | Seg (linha de baixo)
                 tickformat="%d/%m<br>%a", 
                 side="top",         
                 showgrid=True,
                 gridcolor='#333333',
-                dtick=86400000.0,    # 1 dia
+                dtick=86400000.0,    
                 range=[inicio, fim],
-                ticklabelmode="period", # Centraliza
+                ticklabelmode="period", 
                 tickcolor='white',
                 tickfont=dict(color='#cccccc', size=12)
             ),
@@ -228,10 +266,24 @@ def app():
             bargap=0.3
         )
 
-        # Finais de Semana
+        # --- LINHA DO "HOJE" ---
+        fig.add_vline(x=datetime.today(), line_width=2, line_color="#FF4500", opacity=1)
+        fig.add_annotation(
+            x=datetime.today(), y=1, 
+            yref="paper", text="HOJE", 
+            showarrow=False, 
+            font=dict(color="#FF4500", weight="bold"),
+            yshift=10
+        )
+
+        # --- SEPARADORES DE MESES & FINAIS DE SEMANA ---
         curr_date = inicio
+        # Ajuste para começar a iterar do dia 1 do mês corrente se estiver no meio
+        proximo_mes_iter = curr_date.replace(day=1)
+        
         while curr_date <= fim:
-            if curr_date.weekday() in [5, 6]:
+            # 1. Realce de Final de Semana
+            if curr_date.weekday() in [5, 6]: # Sáb e Dom
                 fig.add_vrect(
                     x0=curr_date, 
                     x1=curr_date + timedelta(days=1), 
@@ -240,6 +292,26 @@ def app():
                     layer="below", 
                     line_width=0
                 )
+            
+            # 2. Linha Separadora de Mês (Dia 1)
+            # Verifica se o dia atual é dia 1
+            if curr_date.day == 1:
+                fig.add_vline(
+                    x=curr_date, 
+                    line_width=1, 
+                    line_dash="dot", # Pontilhado
+                    line_color="#666666", 
+                    opacity=0.8
+                )
+                # Opcional: Nome do mês pequeno na linha
+                fig.add_annotation(
+                    x=curr_date, y=0, yref="paper",
+                    text=f"{curr_date.strftime('%b').upper()}", # JAN, FEV...
+                    showarrow=False,
+                    font=dict(color="#888", size=10),
+                    yshift=-25
+                )
+
             curr_date += timedelta(days=1)
 
         st.plotly_chart(fig, use_container_width=True)
