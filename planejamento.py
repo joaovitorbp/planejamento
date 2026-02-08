@@ -167,7 +167,6 @@ def app():
     if 'filtro_ini' not in st.session_state:
         st.session_state['filtro_ini'] = datetime.today().date()
     if 'filtro_fim' not in st.session_state:
-        # Padrão: 30 dias pra frente
         st.session_state['filtro_fim'] = datetime.today().date() + timedelta(days=30)
 
     # --- BOTÕES DE FILTRO RÁPIDO ---
@@ -177,19 +176,15 @@ def app():
     if b1.button("📅 Mês Atual", use_container_width=True):
         set_periodo("mes_atual")
         st.rerun()
-    
     if b2.button("➡️ Próx. Mês", use_container_width=True):
         set_periodo("prox_mes")
         st.rerun()
-        
     if b3.button("📆 3 Meses", use_container_width=True):
         set_periodo("3_meses")
         st.rerun()
 
-    # --- INPUTS MANUAIS (CONECTADOS AO SESSION STATE) ---
     f1, f2, f3 = st.columns([1, 1, 2])
     with f1:
-        # key='filtro_ini' conecta direto ao session_state
         inicio = st.date_input("De:", key="filtro_ini", format="DD/MM/YYYY")
     with f2:
         fim = st.date_input("Até:", key="filtro_fim", format="DD/MM/YYYY")
@@ -239,9 +234,10 @@ def app():
             plot_bgcolor='rgba(0,0,0,0)',
             font=dict(color="white", family="sans-serif"),
             
+            # --- EIXO X (PONTO 2: Apenas Dia/Mês) ---
             xaxis=dict(
                 title=None,
-                tickformat="%d/%m<br>%a", 
+                tickformat="%d/%m",  # Ex: 01/02
                 side="top",         
                 showgrid=True,
                 gridcolor='#333333',
@@ -276,14 +272,12 @@ def app():
             yshift=10
         )
 
-        # --- SEPARADORES DE MESES & FINAIS DE SEMANA ---
+        # --- ITERAÇÃO DIÁRIA ---
         curr_date = inicio
-        # Ajuste para começar a iterar do dia 1 do mês corrente se estiver no meio
-        proximo_mes_iter = curr_date.replace(day=1)
         
         while curr_date <= fim:
-            # 1. Realce de Final de Semana
-            if curr_date.weekday() in [5, 6]: # Sáb e Dom
+            # 1. Final de Semana (Fundo leve)
+            if curr_date.weekday() in [5, 6]: 
                 fig.add_vrect(
                     x0=curr_date, 
                     x1=curr_date + timedelta(days=1), 
@@ -293,23 +287,22 @@ def app():
                     line_width=0
                 )
             
-            # 2. Linha Separadora de Mês (Dia 1)
-            # Verifica se o dia atual é dia 1
+            # 2. SEPARADOR DE MÊS (PONTO 1: DESTAQUE)
             if curr_date.day == 1:
+                # Linha Vertical Branca Sólida
                 fig.add_vline(
                     x=curr_date, 
-                    line_width=1, 
-                    line_dash="dot", # Pontilhado
-                    line_color="#666666", 
-                    opacity=0.8
+                    line_width=2,         # Mais grossa
+                    line_color="#FFFFFF", # Branca
+                    opacity=0.6
                 )
-                # Opcional: Nome do mês pequeno na linha
+                # Nome do Mês em Destaque
                 fig.add_annotation(
                     x=curr_date, y=0, yref="paper",
-                    text=f"{curr_date.strftime('%b').upper()}", # JAN, FEV...
+                    text=f"{curr_date.strftime('%b').upper()}", # JAN, FEV
                     showarrow=False,
-                    font=dict(color="#888", size=10),
-                    yshift=-25
+                    font=dict(color="#FFFFFF", size=14, weight="bold"), # Texto Branco Grande
+                    yshift=-30 # Um pouco abaixo do eixo
                 )
 
             curr_date += timedelta(days=1)
