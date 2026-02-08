@@ -3,16 +3,16 @@ import plotly.express as px
 import pandas as pd
 import conexao
 from datetime import datetime, timedelta
-from dateutil.relativedelta import relativedelta # Necessário para pular meses
+from dateutil.relativedelta import relativedelta
 
-# --- Mapeamento de Meses (Garante Português em qualquer servidor) ---
+# --- Mapeamento de Meses ---
 MAPA_MESES = {
     1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril",
     5: "Maio", 6: "Junho", 7: "Julho", 8: "Agosto",
     9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro"
 }
 
-# --- Função Auxiliar: Datas Padrão ---
+# --- Funções Auxiliares ---
 def get_proxima_semana():
     hoje = datetime.now().date()
     dias_para_segunda = 7 - hoje.weekday()
@@ -20,7 +20,6 @@ def get_proxima_semana():
     proxima_sexta = proxima_segunda + timedelta(days=4)
     return proxima_segunda, proxima_sexta
 
-# --- Função Auxiliar: Situação e Cores ---
 def calcular_situacao_e_cores(row):
     hoje = datetime.now().date()
     try:
@@ -88,7 +87,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
         if not data_fim: erros.append("Data Fim")
 
         if erros:
-            st.error(f"Preencha os campos obrigatórios: {', '.join(erros)}")
+            st.error(f"Campos obrigatórios: {', '.join(erros)}")
             return
 
         with st.spinner("Salvando..."):
@@ -151,10 +150,8 @@ def app():
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
-    # --- Filtros Padrão: HOJE (Início) até +30 dias ---
-    padrao_inicio = datetime.today().date() # HOJE como padrão
-    
-    # Define limite superior
+    # Filtros Padrão
+    padrao_inicio = datetime.today().date()
     max_data = df_processado['Data Fim'].max().date()
     padrao_fim = max(padrao_inicio + timedelta(days=30), max_data)
 
@@ -175,7 +172,6 @@ def app():
 
     if not df_filtrado.empty:
         df_filtrado = df_filtrado.sort_values(by=['Data Início', 'Projeto'])
-        
         qtd_projetos = len(df_filtrado['Projeto'].unique())
         altura = max(300, qtd_projetos * 50)
 
@@ -216,9 +212,9 @@ def app():
                 side="top",         
                 showgrid=True,
                 gridcolor='#333333',
-                dtick=86400000.0,    # 1 dia exato
+                dtick=86400000.0,    # 1 dia
                 range=[inicio, fim],
-                ticklabelmode="period", # Centraliza
+                ticklabelmode="period", 
                 tickcolor='white',
                 tickfont=dict(color='#cccccc', size=12)
             ),
@@ -232,52 +228,56 @@ def app():
                 type='category'
             ),
             
-            # Margem topo maior para caber o texto dos meses
-            margin=dict(t=80, b=10, l=0, r=0),
+            # --- MARGEM SUPERIOR GIGANTE (Para caber os meses sem sobrepor) ---
+            margin=dict(t=140, b=10, l=0, r=0),
             showlegend=False,
             bargap=0.3
         )
 
-        # --- A MÁGICA DOS MESES (ANOTAÇÕES MANUAIS) ---
-        # Percorre mês a mês dentro do intervalo selecionado
-        # e coloca o nome do mês centralizado na parte VISÍVEL dele.
+        # --- ANOTAÇÕES DE MESES (Com Y ajustado para cima) ---
+        # Lógica: Desenha o texto do mês manualmente acima do eixo de dias
         
         curr_mes = inicio.replace(day=1)
-        fim_ajustado = fim + relativedelta(days=1) # Margem segurança
+        # Margem de segurança para o loop
+        loop_limit = fim + relativedelta(months=1)
 
-        while curr_mes <= fim:
-            # Inicio e Fim real do mês
+        while curr_mes <= loop_limit:
+            # Define o intervalo do mês corrente
             inicio_mes = curr_mes
             fim_mes = curr_mes + relativedelta(months=1) - timedelta(days=1)
 
-            # Qual parte do mês está visível na tela?
+            # Intersecção: O que deste mês está visível na tela?
             visivel_inicio = max(inicio, inicio_mes)
             visivel_fim = min(fim, fim_mes)
 
-            # Se o mês tem alguma parte visível
+            # Se houver intersecção válida
             if visivel_inicio <= visivel_fim:
-                # Calcula o ponto central (em datas)
-                dias_diff = (visivel_fim - visivel_inicio).days
-                centro_visivel = visivel_inicio + timedelta(days=dias_diff / 2)
+                # Calcula o ponto médio VISÍVEL (em datas)
+                # Convertendo para timestamp para média aritmética precisa
+                ts_inicio = visivel_inicio.toordinal()
+                ts_fim = visivel_fim.toordinal()
+                ts_meio = (ts_inicio + ts_fim) / 2
+                centro_visivel = datetime.fromordinal(int(ts_meio))
                 
-                # Nome do mês em PT-BR
-                nome_mes = f"{MAPA_MESES[curr_mes.month]} {curr_mes.year}"
+                # Nome do mês
+                nome_mes = f"{MAPA_MESES[curr_mes.month]} {curr_mes.year}".upper()
 
-                # Adiciona texto flutuante no topo
+                # Adiciona o texto BEM ACIMA do gráfico
+                # y=1.15 em relação ao topo da área de plotagem
                 fig.add_annotation(
                     x=centro_visivel,
-                    y=1.08, # Um pouco acima do gráfico (eixo Y relativo ao papel)
+                    y=1.20, # <--- ALTURA AJUSTADA PARA NÃO SOBREPOR
                     yref="paper",
                     text=nome_mes,
                     showarrow=False,
                     font=dict(color="white", size=14, weight="bold")
                 )
                 
-                # Opcional: Linha separadora de meses
+                # Opcional: Linha vertical sutil separando os meses
                 if visivel_inicio == inicio_mes and visivel_inicio > inicio:
-                     fig.add_vline(x=visivel_inicio, line_width=1, line_color="#555", line_dash="dot")
+                     fig.add_vline(x=visivel_inicio, line_width=1, line_color="#444", line_dash="solid")
 
-            # Avança para o próximo mês
+            # Vai para o próximo mês
             curr_mes += relativedelta(months=1)
 
         # Finais de Semana
