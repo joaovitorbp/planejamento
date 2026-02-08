@@ -5,7 +5,7 @@ import conexao
 from datetime import datetime
 
 # --- Modal (Pop-up) de Agendamento ---
-# (Mantive idêntico ao anterior pois a lógica de salvar estava perfeita)
+# (Mantido idêntico pois a lógica de salvar está correta)
 @st.dialog("Agendar Nova Atividade")
 def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     st.write("Novo Agendamento")
@@ -61,116 +61,6 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
                 df_final = pd.concat([df_agenda_atual, nova_linha], ignore_index=True)
 
             try:
-                # Sanitização de Datas
                 df_final['Data Início'] = pd.to_datetime(df_final['Data Início'], dayfirst=True).dt.strftime('%Y-%m-%d')
                 df_final['Data Fim'] = pd.to_datetime(df_final['Data Fim'], dayfirst=True).dt.strftime('%Y-%m-%d')
-                df_final = df_final.fillna("")
-                conexao.salvar_no_sheets(df_final)
-                st.success("Salvo!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Erro: {e}")
-
-# --- App Principal ---
-def app():
-    col1, col2 = st.columns([3, 1])
-    col1.header("📅 Cronograma Simples")
-
-    with st.spinner("Lendo dados..."):
-        df_agenda, df_frota, df_time, df_obras = conexao.carregar_dados()
-
-    with col2:
-        if st.button("➕ Agendar", use_container_width=True):
-            modal_agendamento(df_obras, df_frota, df_time, df_agenda)
-
-    if df_agenda.empty:
-        st.info("Nenhum agendamento.")
-        return
-
-    # 1. Processamento de Datas
-    try:
-        df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], dayfirst=True, errors='coerce')
-        df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], dayfirst=True, errors='coerce')
-        df_processado = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
-    except:
-        st.error("Erro ao ler datas.")
-        return
-
-    if df_processado.empty:
-        return
-
-    # 2. Filtros de Data
-    min_date = df_processado['Data Início'].min().date()
-    max_date = df_processado['Data Fim'].max().date()
-    
-    c1, c2 = st.columns(2)
-    with c1:
-        inicio = st.date_input("De:", value=min_date, format="DD/MM/YYYY")
-    with c2:
-        fim = st.date_input("Até:", value=max_date, format="DD/MM/YYYY")
-
-    mask = (df_processado['Data Início'].dt.date >= inicio) & (df_processado['Data Fim'].dt.date <= fim)
-    df_filtrado = df_processado.loc[mask]
-
-    # 3. Gráfico (Simples e Direto)
-    if not df_filtrado.empty:
-        # Ordena por Projeto e Data
-        df_filtrado = df_filtrado.sort_values(by=['Projeto', 'Data Início'])
-        
-        # Altura dinâmica para caber tudo
-        altura = 300 + (len(df_filtrado) * 30)
-
-        fig = px.timeline(
-            df_filtrado, 
-            x_start="Data Início", 
-            x_end="Data Fim", 
-            y="Projeto",       # Eixo Y = Projetos
-            text="Projeto",    # Texto dentro da barra = Nome do Projeto
-            color="Status",    # Cor = Status (para diferenciar visualmente)
-            height=altura,
-            title=""
-        )
-
-        # Formatação Limpa
-        fig.update_layout(
-            xaxis=dict(
-                title="",
-                tickformat="%d/%m", # Formato Dia/Mês no eixo X
-                side="top",         # Datas aparecem em cima
-                gridcolor='#eee'
-            ),
-            yaxis=dict(
-                title="", 
-                autorange="reversed" # Projetos de cima para baixo
-            ),
-            showlegend=True,
-            plot_bgcolor='white',
-            margin=dict(t=40, b=20) # Margens ajustadas
-        )
-
-        # Texto dentro da barra
-        fig.update_traces(
-            textposition='inside', 
-            insidetextanchor='start' # Texto alinhado à esquerda dentro da barra
-        )
-
-        st.plotly_chart(fig, use_container_width=True)
-
-        st.divider()
-        
-        # Tabela Simples
-        df_exibicao = df_filtrado.copy()
-        df_exibicao["Data Início"] = df_exibicao["Data Início"].dt.date
-        df_exibicao["Data Fim"] = df_exibicao["Data Fim"].dt.date
-        
-        st.dataframe(
-            df_exibicao[["Projeto", "Data Início", "Data Fim", "Veículo", "Status"]], 
-            use_container_width=True, 
-            hide_index=True,
-            column_config={
-                "Data Início": st.column_config.DateColumn("Início", format="DD/MM/YYYY"),
-                "Data Fim": st.column_config.DateColumn("Fim", format="DD/MM/YYYY")
-            }
-        )
-    else:
-        st.warning("Nada encontrado no período.")
+                df
