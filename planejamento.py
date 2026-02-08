@@ -143,7 +143,7 @@ def app():
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
-    # --- FILTROS MANUAIS ---
+    # Filtros Manuais
     padrao_inicio = datetime.today().date()
     max_data = df_processado['Data Fim'].max().date()
     padrao_fim = max(padrao_inicio + timedelta(days=30), max_data)
@@ -189,14 +189,10 @@ def app():
                 line=dict(color=df_filtrado['CorLine'], width=1),
                 cornerradius=5
             ),
-            # --- PONTO 3: Texto fixo ---
             textposition='inside', 
             insidetextanchor='start',
             textfont=dict(color='white', weight='bold', size=13),
-            
-            # constraintext='none' -> Impede que o texto encolha. 
-            # Se não couber, ele vaza para a direita (fora da barra), mantendo o tamanho.
-            constraintext='none' 
+            constraintext='none'
         )
 
         fig.update_layout(
@@ -204,8 +200,7 @@ def app():
             plot_bgcolor='rgba(0,0,0,0)',
             font=dict(color="white", family="sans-serif"),
             
-            # --- PONTO 4: Arrastar para Mover (Pan) ---
-            dragmode="pan", # Agora o padrão é mover, não dar zoom
+            dragmode="pan", 
             
             xaxis=dict(
                 title=None,
@@ -226,7 +221,8 @@ def app():
                 showgrid=False,
                 showticklabels=False, 
                 visible=True,
-                type='category'
+                type='category',
+                fixedrange=True # <--- PONTO 1: Trava o movimento vertical
             ),
             
             margin=dict(t=60, b=10, l=0, r=0),
@@ -234,27 +230,25 @@ def app():
             bargap=0.3
         )
 
-        # --- PONTO 1: LINHA DO "HOJE" (AZUL NEON) ---
+        # Linha HOJE
         fig.add_vline(
             x=datetime.today(), 
             line_width=3, 
-            line_color="#00FFFF", # Ciano Neon (Destaque total)
-            line_dash="dot",      # Pontilhado para diferenciar das barras sólidas
+            line_color="#00FFFF",
+            line_dash="dot",
             opacity=1
         )
         fig.add_annotation(
             x=datetime.today(), y=1, 
             yref="paper", text="HOJE", 
             showarrow=False, 
-            font=dict(color="#00FFFF", weight="bold"), # Texto também neon
+            font=dict(color="#00FFFF", weight="bold"),
             yshift=10
         )
 
-        # --- LOOP DIÁRIO ---
+        # Loop Visual
         curr_date = inicio
-        
         while curr_date <= fim:
-            # Fim de Semana
             if curr_date.weekday() in [5, 6]: 
                 fig.add_vrect(
                     x0=curr_date, 
@@ -265,13 +259,12 @@ def app():
                     line_width=0
                 )
             
-            # --- PONTO 2: SEPARADOR DE MÊS (MAIS GROSSO) ---
             if curr_date.day == 1:
                 fig.add_vline(
                     x=curr_date, 
-                    line_width=3,         # Aumentei para 3px
+                    line_width=3,         
                     line_color="#FFFFFF", 
-                    opacity=0.8           # Mais visível
+                    opacity=0.8           
                 )
                 fig.add_annotation(
                     x=curr_date, y=0, yref="paper",
@@ -288,6 +281,7 @@ def app():
         st.divider()
         st.subheader("Detalhamento")
         
+        # --- PONTO 2: Removemos a coluna Situacao ---
         cols_tabela = ["Projeto", "Descrição", "Cliente", "Data Início", "Data Fim", "Executantes"]
         cols_finais = [c for c in cols_tabela if c in df_filtrado.columns]
         df_tabela = df_filtrado[cols_finais].copy()
