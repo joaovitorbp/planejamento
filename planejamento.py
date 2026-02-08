@@ -2,79 +2,120 @@ import streamlit as st
 import plotly.express as px
 import pandas as pd
 import conexao
+from datetime import datetime
 
-def app():
-    st.header("📅 Visualização do Planejamento")
+# --- Modal (Pop-up) de Agendamento ---
+@st.dialog("Agendar Nova Atividade")
+def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
+    st.write("Preencha os dados abaixo.")
 
-    # Carregar Dados
-    with st.spinner("Carregando dados..."):
-        df_agenda, df_frota, df_obras = conexao.carregar_dados()
+    # Preparar listas
+    lista_projetos = df_obras['Projeto'].dropna().unique().tolist() if 'Projeto' in df_obras.columns else []
+    lista_time = df_time['Nome'].dropna().unique().tolist() if not df_time.empty and 'Nome' in df_time.columns else []
+    
+    col_veic = 'Veículo' if 'Veículo' in df_frota.columns else 'Placa'
+    lista_veiculos = df_frota[col_veic].dropna().unique().tolist() if not df_frota.empty else []
 
-    if df_agenda.empty:
-        st.warning("A agenda está vazia ou não foi carregada corretamente.")
-        # Cria um dataframe vazio com as colunas certas para não dar erro no merge
-        df_agenda = pd.DataFrame(columns=['cod_orcamento', 'veiculo', 'data_inicio', 'data_fim', 'status'])
+    # Formulário
+    projeto_selecionado = st.selectbox("Projeto", options=lista_projetos, index=None, placeholder="Selecione...")
 
-    # Merge: Cruzar Agenda com Obras para pegar detalhes
-    if not df_obras.empty and 'cod_orcamento' in df_agenda.columns and 'cod_orcamento' in df_obras.columns:
-        # Garante que as chaves de merge sejam do mesmo tipo (string)
-        df_agenda['cod_orcamento'] = df_agenda['cod_orcamento'].astype(str)
-        df_obras['cod_orcamento'] = df_obras['cod_orcamento'].astype(str)
-        
-        try:
-            df_completo = pd.merge(df_agenda, df_obras, on='cod_orcamento', how='left')
-        except Exception as e:
-            st.error(f"Erro ao cruzar tabelas: {e}")
-            df_completo = df_agenda
-    else:
-        df_completo = df_agenda
+    # Autopreenchimento
+    desc_auto = ""
+    cliente_auto = ""
+    if projeto_selecionado:
+        # Pega a primeira linha que corresponde ao projeto
+        dados = df_obras[df_obras['Projeto'] == projeto_selecionado].iloc[0]
+        desc_auto = dados.get('Descrição', "")
+        # Junta Cliente + Cidade
+        cliente_auto = f"{dados.get('Cliente', '')} - {dados.get('Cidade', '')}"
 
-    # Filtros de Data
+    descricao = st.text_input("Descrição", value=desc_auto, disabled=True) # Read-only
+    cliente = st.text_input("Cliente", value=cliente_auto, disabled=True) # Read-only
+
     col1, col2 = st.columns(2)
     with col1:
-        data_inicio = st.date_input("Data Início", value=pd.to_datetime("today"))
+        data_inicio = st.date_input("Data de Início", value=datetime.today())
     with col2:
-        data_fim = st.date_input("Data Fim", value=pd.to_datetime("today") + pd.Timedelta(days=30))
+        data_fim = st.date_input("Data de Término", value=datetime.today())
 
-    # Se a tabela estiver vazia, para por aqui
-    if df_completo.empty:
-        st.info("Sem dados para exibir.")
+    executantes = st.multiselect("Executantes", options=lista_time)
+    veiculo = st.selectbox("Veículo (Opcional)", options=lista_veiculos, index=None, placeholder="Selecione...")
+
+    if st.button("Salvar Agendamento", type="primary"):
+        if not projeto_selecionado or not executantes:
+            st.error("Projeto e Executantes são obrigatórios.")
+            return
+
+        with st.spinner("Salvando..."):
+            # Cria nova linha
+            nova_linha = pd.DataFrame([{
+                "Projeto": projeto_selecionado,
+                "Descrição": descricao,
+                "Cliente": cliente,
+                "Data Início": data_inicio.strftime('%Y-%m-%d'),
+                "Data Fim": data_fim.strftime('%Y-%m-%d'),
+                "Executantes": ", ".join(executantes), # Converte lista para texto
+                "Veículo": veiculo if veiculo else "",
+                "Status": "Planejado"
+            }])
+
+            # Concatena com o que já existe
+            if df_agenda_atual.empty:
+                df_final = nova_linha
+            else:
+                df_final = pd.concat([df_agenda_atual, nova_linha], ignore_index=True)
+
+            try:
+                conexao.salvar_no_sheets(df_final)
+                st.success("Salvo com sucesso!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao salvar: {e}")
+
+# --- Página Principal ---
+def app():
+    col_topo_1, col_topo_2 = st.columns([3, 1])
+    col_topo_1.header("📅 Visualização do Planejamento")
+
+    with st.spinner("Carregando dados..."):
+        df_agenda, df_frota, df_time, df_obras = conexao.carregar_dados()
+
+    # Botão que abre o Modal
+    with col_topo_2:
+        if st.button("➕ Agendar Atividade", use_container_width=True):
+            modal_agendamento(df_obras, df_frota, df_time, df_agenda)
+
+    if df_agenda.empty:
+        st.info("Agenda vazia. Adicione o primeiro item.")
         return
 
-    # Tratamento de datas para o gráfico
+    # Normalização de datas para o gráfico
     try:
-        # Converte colunas de data
-        df_completo['data_inicio'] = pd.to_datetime(df_completo['data_inicio'], errors='coerce')
-        df_completo['data_fim'] = pd.to_datetime(df_completo['data_fim'], errors='coerce')
+        df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], errors='coerce')
+        df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], errors='coerce')
+        df_agenda = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
+    except:
+        st.dataframe(df_agenda) # Mostra a tabela crua se der erro
+        return
+
+    # Gráfico
+    if not df_agenda.empty:
+        # Usa Veículo no eixo Y, se não tiver, usa Projeto
+        y_axis = "Veículo"
+        if df_agenda["Veículo"].astype(str).str.strip().eq("").all():
+            y_axis = "Projeto"
+
+        fig = px.timeline(
+            df_agenda, 
+            x_start="Data Início", 
+            x_end="Data Fim", 
+            y=y_axis, 
+            color="Status",
+            hover_data=["Projeto", "Cliente", "Executantes"],
+            title=f"Cronograma por {y_axis}"
+        )
+        fig.update_yaxes(autorange="reversed")
+        st.plotly_chart(fig, use_container_width=True)
         
-        # Remove linhas com datas inválidas (NaT) que quebrariam o gráfico
-        df_completo = df_completo.dropna(subset=['data_inicio', 'data_fim'])
-
-        # Filtrar pelo período selecionado
-        mask = (df_completo['data_inicio'] >= pd.to_datetime(data_inicio)) & (df_completo['data_fim'] <= pd.to_datetime(data_fim))
-        df_filtrado = df_completo.loc[mask]
-
-        # Gráfico de Gantt
-        st.subheader("Gráfico de Gantt")
-        if not df_filtrado.empty:
-            fig = px.timeline(
-                df_filtrado, 
-                x_start="data_inicio", 
-                x_end="data_fim", 
-                y="veiculo", 
-                color="status" if "status" in df_filtrado.columns else None,
-                # hover_data só se as colunas existirem
-                hover_data=["cod_orcamento"] if "cod_orcamento" in df_filtrado.columns else None,
-                title="Alocação por Veículo"
-            )
-            fig.update_yaxes(autorange="reversed") 
-            st.plotly_chart(fig, use_container_width=True)
-            
-            st.divider()
-            st.subheader("Detalhamento")
-            st.dataframe(df_filtrado, use_container_width=True)
-        else:
-            st.info("Nenhum agendamento encontrado para este período.")
-            
-    except Exception as e:
-        st.error(f"Erro ao gerar gráfico: {e}")
+        st.divider()
+        st.dataframe(df_agenda, use_container_width=True)
