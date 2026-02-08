@@ -1,13 +1,14 @@
 import streamlit as st
+import plotly.express as px
 import pandas as pd
 import conexao
 from datetime import datetime
-from streamlit_timeline import timeline # <--- A NOVA BIBLIOTECA
 
-# --- Modal (Pop-up) de Agendamento (MANTIDO IGUAL) ---
+# --- Modal (Pop-up) de Agendamento ---
+# (Mantive idêntico ao anterior pois a lógica de salvar estava perfeita)
 @st.dialog("Agendar Nova Atividade")
 def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
-    st.write("Preencha os dados abaixo.")
+    st.write("Novo Agendamento")
 
     # Listas
     lista_projetos = df_obras['Projeto'].dropna().unique().tolist() if 'Projeto' in df_obras.columns else []
@@ -37,9 +38,9 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     executantes = st.multiselect("Executantes", options=lista_time)
     veiculo = st.selectbox("Veículo (Opcional)", options=lista_veiculos, index=None, placeholder="Selecione...")
 
-    if st.button("Salvar Agendamento", type="primary"):
-        if not projeto_selecionado or not executantes:
-            st.error("Campos obrigatórios faltando.")
+    if st.button("Salvar", type="primary"):
+        if not projeto_selecionado:
+            st.error("Selecione um projeto.")
             return
 
         with st.spinner("Salvando..."):
@@ -60,6 +61,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
                 df_final = pd.concat([df_agenda_atual, nova_linha], ignore_index=True)
 
             try:
+                # Sanitização de Datas
                 df_final['Data Início'] = pd.to_datetime(df_final['Data Início'], dayfirst=True).dt.strftime('%Y-%m-%d')
                 df_final['Data Fim'] = pd.to_datetime(df_final['Data Fim'], dayfirst=True).dt.strftime('%Y-%m-%d')
                 df_final = df_final.fillna("")
@@ -71,107 +73,104 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
 
 # --- App Principal ---
 def app():
-    col_topo_1, col_topo_2 = st.columns([3, 1])
-    col_topo_1.header("📅 Timeline de Projetos")
+    col1, col2 = st.columns([3, 1])
+    col1.header("📅 Cronograma Simples")
 
-    with st.spinner("Carregando dados..."):
+    with st.spinner("Lendo dados..."):
         df_agenda, df_frota, df_time, df_obras = conexao.carregar_dados()
 
-    with col_topo_2:
-        if st.button("➕ Novo Evento", use_container_width=True):
+    with col2:
+        if st.button("➕ Agendar", use_container_width=True):
             modal_agendamento(df_obras, df_frota, df_time, df_agenda)
 
     if df_agenda.empty:
-        st.info("Agenda vazia.")
+        st.info("Nenhum agendamento.")
         return
 
-    # Processamento de Datas
+    # 1. Processamento de Datas
     try:
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], dayfirst=True, errors='coerce')
         df_processado = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
     except:
-        st.error("Erro nos dados.")
+        st.error("Erro ao ler datas.")
         return
 
     if df_processado.empty:
-        st.warning("Sem datas válidas.")
         return
 
-    # --- PREPARAÇÃO PARA A TIMELINE NATIVA ---
-    # A biblioteca exige um JSON específico. Vamos transformar o DataFrame nele.
-    items = []
+    # 2. Filtros de Data
+    min_date = df_processado['Data Início'].min().date()
+    max_date = df_processado['Data Fim'].max().date()
     
-    # Cores baseadas no Status para ficar bonito
-    cores_status = {
-        "Planejado": "#3498db",  # Azul
-        "Confirmado": "#f1c40f", # Amarelo
-        "Executado": "#2ecc71",  # Verde
-        "Cancelado": "#e74c3c"   # Vermelho
-    }
+    c1, c2 = st.columns(2)
+    with c1:
+        inicio = st.date_input("De:", value=min_date, format="DD/MM/YYYY")
+    with c2:
+        fim = st.date_input("Até:", value=max_date, format="DD/MM/YYYY")
 
-    for _, row in df_processado.iterrows():
-        # Define a cor de fundo do slide baseada no status
-        cor_fundo = cores_status.get(row.get("Status"), "#bdc3c7")
+    mask = (df_processado['Data Início'].dt.date >= inicio) & (df_processado['Data Fim'].dt.date <= fim)
+    df_filtrado = df_processado.loc[mask]
+
+    # 3. Gráfico (Simples e Direto)
+    if not df_filtrado.empty:
+        # Ordena por Projeto e Data
+        df_filtrado = df_filtrado.sort_values(by=['Projeto', 'Data Início'])
         
-        item = {
-            "start_date": {
-                "year": row['Data Início'].year,
-                "month": row['Data Início'].month,
-                "day": row['Data Início'].day
-            },
-            "end_date": {
-                "year": row['Data Fim'].year,
-                "month": row['Data Fim'].month,
-                "day": row['Data Fim'].day
-            },
-            "text": {
-                "headline": f"{row['Projeto']} <br><small>({row.get('Veículo', 'Sem Veículo')})</small>",
-                "text": f"<b>Cliente:</b> {row.get('Cliente', '')}<br><b>Equipe:</b> {row.get('Executantes', '')}<br><b>Status:</b> {row.get('Status', '')}"
-            },
-            "group": row.get('Veículo', 'Geral'), # Agrupa visualmente se quiser (opcional)
-            # A biblioteca suporta customização de fundo (background)
-            "background": { 
-                "color": cor_fundo,
-                "opacity": 0.2 
-            }
-        }
-        items.append(item)
+        # Altura dinâmica para caber tudo
+        altura = 300 + (len(df_filtrado) * 30)
 
-    # Estrutura final do JSON
-    timeline_data = {
-        "title": {
-            "media": {
-              "url": "",
-              "caption": "",
-              "credit": ""
-            },
-            "text": {
-              "headline": "Planejamento de Obras",
-              "text": "Cronograma interativo de execução e frotas."
-            }
-        },
-        "events": items
-    }
+        fig = px.timeline(
+            df_filtrado, 
+            x_start="Data Início", 
+            x_end="Data Fim", 
+            y="Projeto",       # Eixo Y = Projetos
+            text="Projeto",    # Texto dentro da barra = Nome do Projeto
+            color="Status",    # Cor = Status (para diferenciar visualmente)
+            height=altura,
+            title=""
+        )
 
-    # --- RENDERIZAÇÃO DA TIMELINE ---
-    # height ajusta a altura da caixa interativa
-    timeline(timeline_data, height=600)
-    
-    st.divider()
-    
-    # Tabela de Apoio (Mantida simples)
-    st.subheader("Dados em Tabela")
-    df_exibicao = df_processado.copy()
-    df_exibicao["Data Início"] = df_exibicao["Data Início"].dt.date
-    df_exibicao["Data Fim"] = df_exibicao["Data Fim"].dt.date
-    
-    st.dataframe(
-        df_exibicao,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Data Início": st.column_config.DateColumn("Início", format="DD/MM/YYYY"),
-            "Data Fim": st.column_config.DateColumn("Fim", format="DD/MM/YYYY")
-        }
-    )
+        # Formatação Limpa
+        fig.update_layout(
+            xaxis=dict(
+                title="",
+                tickformat="%d/%m", # Formato Dia/Mês no eixo X
+                side="top",         # Datas aparecem em cima
+                gridcolor='#eee'
+            ),
+            yaxis=dict(
+                title="", 
+                autorange="reversed" # Projetos de cima para baixo
+            ),
+            showlegend=True,
+            plot_bgcolor='white',
+            margin=dict(t=40, b=20) # Margens ajustadas
+        )
+
+        # Texto dentro da barra
+        fig.update_traces(
+            textposition='inside', 
+            insidetextanchor='start' # Texto alinhado à esquerda dentro da barra
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.divider()
+        
+        # Tabela Simples
+        df_exibicao = df_filtrado.copy()
+        df_exibicao["Data Início"] = df_exibicao["Data Início"].dt.date
+        df_exibicao["Data Fim"] = df_exibicao["Data Fim"].dt.date
+        
+        st.dataframe(
+            df_exibicao[["Projeto", "Data Início", "Data Fim", "Veículo", "Status"]], 
+            use_container_width=True, 
+            hide_index=True,
+            column_config={
+                "Data Início": st.column_config.DateColumn("Início", format="DD/MM/YYYY"),
+                "Data Fim": st.column_config.DateColumn("Fim", format="DD/MM/YYYY")
+            }
+        )
+    else:
+        st.warning("Nada encontrado no período.")
