@@ -2,29 +2,36 @@ import streamlit as st
 import planejamento
 import plano_de_acao
 
-# Configuração da página deve ser a primeira coisa
+# Configuração da página (Sempre a primeira linha)
 st.set_page_config(page_title="Gestão de Obras", layout="wide")
 
-# Inicializa o estado da página se não existir
+# Inicializa estado da página
 if 'pagina_atual' not in st.session_state:
     st.session_state['pagina_atual'] = 'Planejamento'
 
-# --- Sidebar de Navegação (Estilo Menu) ---
+# --- BARRA LATERAL ---
 st.sidebar.title("Navegação")
 
-# Botões que funcionam como links
-if st.sidebar.button("📊 Visualizar Planejamento", use_container_width=True):
+if st.sidebar.button("📅 Cronograma (Gantt)", use_container_width=True):
     st.session_state['pagina_atual'] = 'Planejamento'
     st.rerun()
 
-if st.sidebar.button("📝 Editar Agenda", use_container_width=True):
+if st.sidebar.button("📝 Editar Agenda (Tabela)", use_container_width=True):
     st.session_state['pagina_atual'] = 'Editar'
     st.rerun()
 
 st.sidebar.divider()
-st.sidebar.info(f"Página Atual: {st.session_state['pagina_atual']}")
 
-# --- Controle de Páginas ---
+# --- BOTÃO MÁGICO PARA LIMPAR O CACHE ---
+# Se você editou algo direto no Google Sheets e não apareceu, clique aqui.
+st.sidebar.markdown("### Admin")
+if st.sidebar.button("🔄 Atualizar Dados (Limpar Cache)", use_container_width=True, type="secondary"):
+    st.cache_data.clear()  # Apaga a memória
+    st.rerun()             # Recarrega a página
+
+st.sidebar.divider()
+
+# --- ROTEAMENTO DE PÁGINAS ---
 if st.session_state['pagina_atual'] == 'Planejamento':
     planejamento.app()
 elif st.session_state['pagina_atual'] == 'Editar':
