@@ -5,7 +5,6 @@ import conexao
 from datetime import datetime
 
 # --- Modal (Pop-up) de Agendamento ---
-# (Mantido idêntico pois a lógica de salvar está correta)
 @st.dialog("Agendar Nova Atividade")
 def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     st.write("Novo Agendamento")
@@ -61,6 +60,125 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
                 df_final = pd.concat([df_agenda_atual, nova_linha], ignore_index=True)
 
             try:
+                # Sanitização de Datas
                 df_final['Data Início'] = pd.to_datetime(df_final['Data Início'], dayfirst=True).dt.strftime('%Y-%m-%d')
                 df_final['Data Fim'] = pd.to_datetime(df_final['Data Fim'], dayfirst=True).dt.strftime('%Y-%m-%d')
-                df
+                df_final = df_final.fillna("")
+                conexao.salvar_no_sheets(df_final)
+                st.success("Salvo!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro: {e}")
+
+# --- App Principal ---
+def app():
+    col1, col2 = st.columns([3, 1])
+    col1.header("📅 Gráfico de Gantt")
+
+    with st.spinner("Lendo dados..."):
+        df_agenda, df_frota, df_time, df_obras = conexao.carregar_dados()
+
+    with col2:
+        if st.button("➕ Agendar", use_container_width=True):
+            modal_agendamento(df_obras, df_frota, df_time, df_agenda)
+
+    if df_agenda.empty:
+        st.info("Nenhum agendamento.")
+        return
+
+    # 1. Tratamento de Datas
+    try:
+        df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], dayfirst=True, errors='coerce')
+        df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], dayfirst=True, errors='coerce')
+        df_processado = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
+    except:
+        st.error("Erro nas datas.")
+        return
+
+    if df_processado.empty:
+        st.warning("Sem dados válidos.")
+        return
+
+    # 2. Filtros
+    min_date = df_processado['Data Início'].min().date()
+    max_date = df_processado['Data Fim'].max().date()
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        inicio = st.date_input("De:", value=min_date, format="DD/MM/YYYY")
+    with c2:
+        fim = st.date_input("Até:", value=max_date, format="DD/MM/YYYY")
+
+    mask = (df_processado['Data Início'].dt.date >= inicio) & (df_processado['Data Fim'].dt.date <= fim)
+    df_filtrado = df_processado.loc[mask]
+
+    # 3. O GRÁFICO GANTT (Plotly)
+    if not df_filtrado.empty:
+        # Ordena para o gráfico ficar bonito
+        df_filtrado = df_filtrado.sort_values(by=['Data Início'])
+        
+        # Altura dinâmica
+        qtd_projetos = len(df_filtrado)
+        altura_grafico = 300 + (qtd_projetos * 40)
+
+        fig = px.timeline(
+            df_filtrado, 
+            x_start="Data Início", 
+            x_end="Data Fim", 
+            y="Projeto",       
+            color="Status",    
+            text="Projeto",    
+            height=altura_grafico,
+            hover_data=["Cliente", "Veículo", "Executantes"]
+        )
+
+        # Configurações Visuais
+        fig.update_layout(
+            xaxis=dict(
+                title="",
+                tickformat="%d/%m", 
+                side="top",         
+                gridcolor='#e0e0e0',
+                showgrid=True
+            ),
+            yaxis=dict(
+                title="", 
+                autorange="reversed", 
+                showgrid=True,
+                gridcolor='#e0e0e0'
+            ),
+            plot_bgcolor='white',
+            margin=dict(t=40, b=20, l=10, r=10),
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="right", x=1)
+        )
+
+        # Texto dentro da barra
+        fig.update_traces(
+            textposition='inside', 
+            insidetextanchor='start', 
+            marker_line_width=1,      
+            marker_line_color='white',
+            opacity=0.9
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.divider()
+        
+        # Tabela Simples
+        df_exibicao = df_filtrado.copy()
+        df_exibicao["Data Início"] = df_exibicao["Data Início"].dt.date
+        df_exibicao["Data Fim"] = df_exibicao["Data Fim"].dt.date
+        
+        st.dataframe(
+            df_exibicao[["Projeto", "Data Início", "Data Fim", "Veículo", "Status"]], 
+            use_container_width=True, 
+            hide_index=True,
+            column_config={
+                "Data Início": st.column_config.DateColumn("Início", format="DD/MM/YYYY"),
+                "Data Fim": st.column_config.DateColumn("Fim", format="DD/MM/YYYY")
+            }
+        )
+    else:
+        st.warning("Nada encontrado neste período.")
