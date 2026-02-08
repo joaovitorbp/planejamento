@@ -5,26 +5,22 @@ import conexao
 from datetime import datetime
 
 # --- Modal (Pop-up) de Agendamento ---
+# (Lógica mantida idêntica, pois funciona perfeitamente)
 @st.dialog("Agendar Nova Atividade")
 def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     st.write("Novo Agendamento")
 
-    # Listas
     lista_projetos = df_obras['Projeto'].dropna().unique().tolist() if 'Projeto' in df_obras.columns else []
     lista_time = df_time['Nome'].dropna().unique().tolist() if not df_time.empty and 'Nome' in df_time.columns else []
     col_veic = 'Veículo' if 'Veículo' in df_frota.columns else 'Placa'
     lista_veiculos = df_frota[col_veic].dropna().unique().tolist() if not df_frota.empty else []
 
-    # Formulário
     projeto_selecionado = st.selectbox("Projeto", options=lista_projetos, index=None, placeholder="Selecione...")
 
     desc_auto = ""
     cliente_auto = ""
     if projeto_selecionado:
-        # Filtra dados
         dados = df_obras[df_obras['Projeto'] == projeto_selecionado].iloc[0]
-        
-        # Busca Descrição
         desc_auto = dados.get('Descricao', "") 
         cliente_auto = f"{dados.get('Cliente', '')} - {dados.get('Cidade', '')}"
 
@@ -63,12 +59,8 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
                 df_final = pd.concat([df_agenda_atual, nova_linha], ignore_index=True)
 
             try:
-                # Sanitização de Datas (Garante ISO YYYY-MM-DD para o Google Sheets)
-                # O problema do "flip" geralmente não é na escrita (aqui), mas na leitura.
-                # Mas aqui garantimos que suba padronizado.
                 df_final['Data Início'] = pd.to_datetime(df_final['Data Início'], dayfirst=True).dt.strftime('%Y-%m-%d')
                 df_final['Data Fim'] = pd.to_datetime(df_final['Data Fim'], dayfirst=True).dt.strftime('%Y-%m-%d')
-                
                 df_final = df_final.fillna("")
                 conexao.salvar_no_sheets(df_final)
                 st.success("Salvo!")
@@ -79,7 +71,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
 # --- App Principal ---
 def app():
     col1, col2 = st.columns([3, 1])
-    col1.header("📅 Cronograma de Obras")
+    col1.header("📅 Cronograma")
 
     with st.spinner("Lendo dados..."):
         df_agenda, df_frota, df_time, df_obras = conexao.carregar_dados()
@@ -92,16 +84,11 @@ def app():
         st.info("Nenhum agendamento.")
         return
 
-    # 1. Tratamento de Dados (CORREÇÃO DO BUG DA DATA)
+    # 1. Tratamento de Dados (BLINDADO)
     try:
-        # CORREÇÃO CRÍTICA: format='mixed' + dayfirst=True
-        # Isso força o Pandas a tentar ler DD/MM/YYYY primeiro, resolvendo a inversão 02/09 -> 09/02
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
-        
-        # Garante que Projeto seja texto para não bugar o eixo Y
-        df_agenda['Projeto'] = df_agenda['Projeto'].astype(str)
-        
+        df_agenda['Projeto'] = df_agenda['Projeto'].astype(str) # Força texto
         df_processado = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
     except Exception as e:
         st.error(f"Erro ao processar dados: {e}")
@@ -124,14 +111,22 @@ def app():
     mask = (df_processado['Data Início'].dt.date >= inicio) & (df_processado['Data Fim'].dt.date <= fim)
     df_filtrado = df_processado.loc[mask]
 
-    # 3. O GRÁFICO GANTT
+    # 3. VISUALIZAÇÃO PROFISSIONAL
     if not df_filtrado.empty:
         # Ordenação
         df_filtrado = df_filtrado.sort_values(by=['Projeto', 'Data Início'], ascending=[True, True])
         
-        # Altura dinâmica
+        # Altura: Compacta mas legível
         qtd_projetos_unicos = len(df_filtrado['Projeto'].unique())
-        altura_grafico = max(400, qtd_projetos_unicos * 50)
+        altura_grafico = max(350, qtd_projetos_unicos * 45)
+
+        # --- PALETA DE CORES MODERNA (Flat Design) ---
+        cores_status = {
+            "Planejado": "#3B82F6",  # Azul Moderno
+            "Confirmado": "#F59E0B", # Âmbar/Laranja Suave
+            "Executado": "#10B981",  # Verde Esmeralda
+            "Cancelado": "#EF4444"   # Vermelho Fosco
+        }
 
         fig = px.timeline(
             df_filtrado, 
@@ -139,47 +134,84 @@ def app():
             x_end="Data Fim", 
             y="Projeto",       
             color="Status",    
-            text="Projeto",    
+            text="Projeto",
+            color_discrete_map=cores_status, # Aplica as cores manuais
             height=altura_grafico,
-            hover_data=["Cliente", "Veículo", "Executantes"]
+            # Customizando o Hover (tooltip) para ficar limpo
+            hover_data={
+                "Projeto": False, # Já está no eixo Y
+                "Data Início": "|%d/%m", # Formato curto
+                "Data Fim": "|%d/%m",
+                "Status": False, # Já está na cor
+                "Veículo": True,
+                "Executantes": True
+            }
         )
 
+        # --- LAYOUT MINIMALISTA ---
         fig.update_layout(
+            # Fontes
+            font_family="Arial, sans-serif",
+            font_color="#333333",
+            title_font_size=18,
+            
+            # Eixo X (Datas)
             xaxis=dict(
                 title="",
-                tickformat="%d/%m", 
+                tickformat="%d/%b", # Dia/Mês (ex: 01/Fev)
+                tickfont=dict(size=12, color="#666"),
                 side="top",         
-                gridcolor='#e0e0e0',
-                showgrid=True
-            ),
-            yaxis=dict(
-                title=None,           # Tira o título do Eixo Y
-                autorange="reversed", 
                 showgrid=True,
-                gridcolor='#e0e0e0',
-                automargin=True,
-                type='category'       # Garante que mostre todos os projetos
+                gridcolor='#F3F4F6', # Grade muito sutil
+                gridwidth=1,
+                dtick="D1", # Grade diária (opcional, pode remover se ficar muito cheio)
+                showline=False,
+                ticks=""
             ),
+            
+            # Eixo Y (Projetos)
+            yaxis=dict(
+                title=None,
+                autorange="reversed", 
+                showgrid=False, # Sem linhas horizontais para limpar
+                automargin=True,
+                type='category',
+                tickfont=dict(size=13, weight="bold", color="#111827") # Projetos em destaque
+            ),
+            
+            # Fundo e Margens
             plot_bgcolor='white',
-            margin=dict(t=40, b=20, l=10, r=10),
+            paper_bgcolor='white',
+            margin=dict(t=30, b=10, l=10, r=10),
+            
+            # Legenda Elegante
             showlegend=True,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            bargap=0.2 
+            legend=dict(
+                orientation="h", 
+                yanchor="bottom", y=1.05, 
+                xanchor="left", x=0,
+                title=None, # Remove título da legenda
+                font=dict(size=12)
+            ),
+            
+            # Espaçamento das barras
+            bargap=0.3 # 0.3 dá um respiro bom entre as linhas
         )
 
+        # --- ESTILO DAS BARRAS ---
         fig.update_traces(
             textposition='inside', 
-            insidetextanchor='start', 
-            marker_line_width=1,      
-            marker_line_color='white',
-            opacity=0.9
+            insidetextanchor='start',
+            textfont=dict(color='white', size=12), # Texto branco para contraste
+            marker_line_width=0, # Remove borda preta (Flat design)
+            opacity=1.0
         )
 
         st.plotly_chart(fig, use_container_width=True)
-
         st.divider()
         
-        # Tabela
+        # Tabela Minimalista
+        st.markdown("### Detalhes")
         df_exibicao = df_filtrado.copy()
         df_exibicao["Data Início"] = df_exibicao["Data Início"].dt.date
         df_exibicao["Data Fim"] = df_exibicao["Data Fim"].dt.date
@@ -190,8 +222,12 @@ def app():
             hide_index=True,
             column_config={
                 "Data Início": st.column_config.DateColumn("Início", format="DD/MM/YYYY"),
-                "Data Fim": st.column_config.DateColumn("Fim", format="DD/MM/YYYY")
+                "Data Fim": st.column_config.DateColumn("Fim", format="DD/MM/YYYY"),
+                "Status": st.column_config.Column(
+                    "Status",
+                    width="small"
+                )
             }
         )
     else:
-        st.warning("Nada encontrado neste período.")
+        st.info("Utilize os filtros acima ou cadastre um novo agendamento.")
