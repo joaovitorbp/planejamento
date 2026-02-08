@@ -9,7 +9,7 @@ from datetime import datetime
 def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     st.write("Preencha os dados abaixo.")
 
-    # Preparar listas
+    # Listas
     lista_projetos = df_obras['Projeto'].dropna().unique().tolist() if 'Projeto' in df_obras.columns else []
     lista_time = df_time['Nome'].dropna().unique().tolist() if not df_time.empty and 'Nome' in df_time.columns else []
     
@@ -39,12 +39,14 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     executantes = st.multiselect("Executantes", options=lista_time)
     veiculo = st.selectbox("Veículo (Opcional)", options=lista_veiculos, index=None, placeholder="Selecione...")
 
+    # Botão Salvar
     if st.button("Salvar Agendamento", type="primary"):
         if not projeto_selecionado or not executantes:
             st.error("Projeto e Executantes são obrigatórios.")
             return
 
         with st.spinner("Salvando..."):
+            # Cria nova linha
             nova_linha = pd.DataFrame([{
                 "Projeto": projeto_selecionado,
                 "Descrição": descricao,
@@ -62,7 +64,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
                 df_final = pd.concat([df_agenda_atual, nova_linha], ignore_index=True)
 
             try:
-                # Garante string YYYY-MM-DD para salvar
+                # Sanitização: Força String YYYY-MM-DD para salvar no JSON do Google
                 df_final['Data Início'] = pd.to_datetime(df_final['Data Início']).dt.strftime('%Y-%m-%d')
                 df_final['Data Fim'] = pd.to_datetime(df_final['Data Fim']).dt.strftime('%Y-%m-%d')
                 df_final = df_final.fillna("")
@@ -73,7 +75,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
             except Exception as e:
                 st.error(f"Erro ao salvar: {e}")
 
-# --- Página Principal ---
+# --- App Principal ---
 def app():
     col_topo_1, col_topo_2 = st.columns([3, 1])
     col_topo_1.header("📅 Visualização do Planejamento")
@@ -89,29 +91,31 @@ def app():
         st.info("Agenda vazia.")
         return
 
-    # Normalização de datas (Timestamp para o Pandas trabalhar)
+    # --- 1. Processamento de Dados (Backend) ---
     try:
+        # Converte para datetime (com hora) para o Pandas conseguir filtrar e fazer gráfico
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], errors='coerce')
-        df_visualizacao = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
+        
+        df_processado = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
     except:
         st.dataframe(df_agenda)
         return
 
-    # Filtros
+    # --- 2. Filtros ---
     col1, col2 = st.columns(2)
     with col1:
         data_filtro_inicio = st.date_input("Filtrar de:", value=datetime.today())
     with col2:
         data_filtro_fim = st.date_input("Até:", value=datetime.today() + pd.Timedelta(days=30))
 
-    mask = (df_visualizacao['Data Início'] >= pd.to_datetime(data_filtro_inicio)) & \
-           (df_visualizacao['Data Fim'] <= pd.to_datetime(data_filtro_fim))
-    df_filtrado = df_visualizacao.loc[mask]
+    mask = (df_processado['Data Início'] >= pd.to_datetime(data_filtro_inicio)) & \
+           (df_processado['Data Fim'] <= pd.to_datetime(data_filtro_fim))
+    df_filtrado = df_processado.loc[mask]
 
-    # Gráfico e Tabela
+    # --- 3. Visualização (Gráfico e Tabela) ---
     if not df_filtrado.empty:
-        # Lógica do Eixo Y
+        # Gráfico de Gantt
         eixo_y = "Veículo"
         if "Veículo" not in df_filtrado.columns or df_filtrado["Veículo"].astype(str).str.strip().eq("").all():
              eixo_y = "Projeto"
@@ -131,20 +135,25 @@ def app():
         st.divider()
         st.subheader("Lista Detalhada")
         
-        # --- AQUI ESTÁ A MUDANÇA ---
-        # Usamos column_config para formatar a data visualmente
+        # --- A CORREÇÃO ESTÁ AQUI ---
+        # Criamos uma cópia para exibição e removemos a hora (.dt.date)
+        # Isso garante que o dado seja apenas data, sem "00:00:00"
+        df_exibicao = df_filtrado.copy()
+        df_exibicao["Data Início"] = df_exibicao["Data Início"].dt.date
+        df_exibicao["Data Fim"] = df_exibicao["Data Fim"].dt.date
+        
         st.dataframe(
-            df_filtrado, 
+            df_exibicao, 
             use_container_width=True,
             hide_index=True,
             column_config={
                 "Data Início": st.column_config.DateColumn(
-                    "Data Início",
-                    format="DD/MM/YYYY"  # Formato Brasileiro
+                    "Início",
+                    format="DD/MM/YYYY" # Força visualização BR
                 ),
                 "Data Fim": st.column_config.DateColumn(
-                    "Data Fim",
-                    format="DD/MM/YYYY"  # Formato Brasileiro
+                    "Fim",
+                    format="DD/MM/YYYY" # Força visualização BR
                 )
             }
         )
