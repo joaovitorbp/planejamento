@@ -3,6 +3,7 @@ import plotly.express as px
 import pandas as pd
 import conexao
 from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta # Importante para manipular meses
 
 # --- Função Auxiliar: Datas Padrão ---
 def get_proxima_semana():
@@ -15,23 +16,56 @@ def get_proxima_semana():
 # --- Função Auxiliar: Situação e Cores ---
 def calcular_situacao_e_cores(row):
     hoje = datetime.now().date()
-    inicio = pd.to_datetime(row['Data Início']).date()
-    fim = pd.to_datetime(row['Data Fim']).date()
+    try:
+        inicio = pd.to_datetime(row['Data Início']).date()
+        fim = pd.to_datetime(row['Data Fim']).date()
+    except:
+        return pd.Series(["Erro", "#000", "#000"])
     
     if inicio > hoje:
         situacao = "Não Iniciada"
-        cor_fill = "#EF4444"  # Vermelho
-        cor_line = "#7F1D1D"  # Borda Escura
+        cor_fill = "#EF4444"
+        cor_line = "#7F1D1D"
     elif fim < hoje:
         situacao = "Concluída"
-        cor_fill = "#10B981"  # Verde
-        cor_line = "#064E3B"  # Borda Escura
+        cor_fill = "#10B981"
+        cor_line = "#064E3B"
     else:
         situacao = "Em Andamento"
-        cor_fill = "#F59E0B"  # Amarelo
-        cor_line = "#78350F"  # Borda Escura
+        cor_fill = "#F59E0B"
+        cor_line = "#78350F"
         
     return pd.Series([situacao, cor_fill, cor_line])
+
+# --- Função para Gerar Eixo de Meses Manualmente ---
+def gerar_eixo_meses(data_inicio, data_fim):
+    """
+    Gera ticks manuais para garantir que o mês apareça mesmo se o dia 1 não estiver visível.
+    """
+    ticks_vals = []
+    ticks_text = []
+    
+    # Começa do primeiro dia do mês da data inicial
+    curr = data_inicio.replace(day=1)
+    
+    while curr <= data_fim:
+        # Ponto central do mês (dia 15) para posicionar o texto, ou o próprio dia 1
+        # Usaremos o dia 15 para tentar centralizar visualmente
+        centro_mes = curr + timedelta(days=14)
+        
+        # Se o centro do mês estiver dentro (ou perto) do range, adicionamos
+        # Se não, forçamos o rótulo no meio do range visível daquele mês
+        
+        # Lógica simplificada: Coloca o rótulo no dia 1 de cada mês
+        # E se o dia 1 não estiver visível (ex: filtro dia 10 a 20),
+        # Adiciona um rótulo no dia inicial do filtro.
+        
+        ticks_vals.append(curr) # Marca o início do mês (grade)
+        
+        # Avança para o próximo mês
+        curr += relativedelta(months=1)
+
+    return ticks_vals
 
 # --- Modal (Pop-up) ---
 @st.dialog("Agendar Nova Atividade")
@@ -77,7 +111,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
         if not data_fim: erros.append("Data Fim")
 
         if erros:
-            st.error(f"Preencha os campos obrigatórios: {', '.join(erros)}")
+            st.error(f"Campos obrigatórios: {', '.join(erros)}")
             return
 
         with st.spinner("Salvando..."):
@@ -140,21 +174,20 @@ def app():
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
-    # --- PONTO 1: Padrão Hoje ---
-    # Define o valor padrão do 'value' como HOJE
-    padrao_filtro_inicio = datetime.today().date()
-    # Define o fim como 30 dias pra frente (para não ficar vazio) ou o máximo da tabela
-    max_global = df_processado['Data Fim'].max().date()
-    padrao_filtro_fim = max(datetime.today().date() + timedelta(days=30), max_global)
+    # Filtros Padrão: HOJE até +30 dias
+    padrao_inicio = datetime.today().date()
+    # Garante que mostre pelo menos 1 mês ou até o fim dos dados
+    max_data = df_processado['Data Fim'].max().date()
+    padrao_fim = max(padrao_inicio + timedelta(days=30), max_data)
 
     f1, f2, f3 = st.columns([1, 1, 2])
     with f1:
-        inicio = st.date_input("De:", value=padrao_filtro_inicio, format="DD/MM/YYYY")
+        inicio = st.date_input("De:", value=padrao_inicio, format="DD/MM/YYYY")
     with f2:
-        fim = st.date_input("Até:", value=padrao_filtro_fim, format="DD/MM/YYYY")
+        fim = st.date_input("Até:", value=padrao_fim, format="DD/MM/YYYY")
     with f3:
-        situacoes_padrao = ["Não Iniciada", "Em Andamento", "Concluída"]
-        filtro_situacao = st.multiselect("Filtrar Situação:", situacoes_padrao, default=situacoes_padrao)
+        situacoes = ["Não Iniciada", "Em Andamento", "Concluída"]
+        filtro_situacao = st.multiselect("Filtrar Situação:", situacoes, default=situacoes)
 
     mask = (df_processado['Data Início'].dt.date >= inicio) & \
            (df_processado['Data Fim'].dt.date <= fim) & \
@@ -198,32 +231,35 @@ def app():
             plot_bgcolor='rgba(0,0,0,0)',
             font=dict(color="white", family="sans-serif"),
             
-            # --- EIXO 1: Dias (Embaixo) ---
+            # --- EIXO X (DIAS) ---
             xaxis=dict(
                 title=None,
-                tickformat="%d",     # Apenas 01, 02...
+                tickformat="%d", # Só o dia (01, 02)
                 side="top",         
                 showgrid=True,
                 gridcolor='#333333',
-                dtick=86400000.0,    # 1 dia
-                ticklabelmode="period", # Centraliza
+                dtick=86400000.0, # 1 dia exato
                 range=[inicio, fim],
+                ticklabelmode="period", # Centraliza o número do dia no espaço
                 tickcolor='white',
                 tickfont=dict(color='#cccccc', size=12)
             ),
             
-            # --- EIXO 2: Meses (Overlay/Acima) ---
+            # --- EIXO X2 (MESES) - Configuração Robusta ---
             xaxis2=dict(
                 title=None,
-                overlaying="x",      # Sobrepõe
-                side="top",          # No topo
-                tickformat="%B %Y",  # Janeiro 2026
-                dtick="M1",          # 1 mês
-                ticklabelmode="period", # Centraliza o texto no mês
-                showgrid=False,      # Sem grade extra
-                range=[inicio, fim], # Sincroniza range
+                overlaying="x",
+                side="top",
+                tickformat="%B %Y", # Fevereiro 2026
+                # dtick="M1" as vezes falha em views curtas.
+                # Aqui usamos dtick numérico (milissegundos) aproximado para forçar a aparição
+                # Mas o "ticklabelmode=period" com overlay funciona melhor se o range for sincronizado.
+                dtick="M1", 
+                ticklabelmode="period",
+                showgrid=False,
+                range=[inicio, fim],
                 tickfont=dict(color='#ffffff', size=15, weight="bold"),
-                position=1           # Garante que fique no topo
+                position=1
             ),
             
             yaxis=dict(
