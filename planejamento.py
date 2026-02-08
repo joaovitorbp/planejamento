@@ -3,16 +3,8 @@ import plotly.express as px
 import pandas as pd
 import conexao
 from datetime import datetime, timedelta
-from dateutil.relativedelta import relativedelta
 
-# --- Mapeamento de Meses ---
-MAPA_MESES = {
-    1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril",
-    5: "Maio", 6: "Junho", 7: "Julho", 8: "Agosto",
-    9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro"
-}
-
-# --- Funções Auxiliares ---
+# --- Função Auxiliar: Datas Padrão ---
 def get_proxima_semana():
     hoje = datetime.now().date()
     dias_para_segunda = 7 - hoje.weekday()
@@ -20,6 +12,7 @@ def get_proxima_semana():
     proxima_sexta = proxima_segunda + timedelta(days=4)
     return proxima_segunda, proxima_sexta
 
+# --- Função Auxiliar: Situação e Cores ---
 def calcular_situacao_e_cores(row):
     hoje = datetime.now().date()
     try:
@@ -30,16 +23,16 @@ def calcular_situacao_e_cores(row):
     
     if inicio > hoje:
         situacao = "Não Iniciada"
-        cor_fill = "#EF4444"
-        cor_line = "#7F1D1D"
+        cor_fill = "#EF4444"  # Vermelho
+        cor_line = "#7F1D1D"  # Borda Escura
     elif fim < hoje:
         situacao = "Concluída"
-        cor_fill = "#10B981"
-        cor_line = "#064E3B"
+        cor_fill = "#10B981"  # Verde
+        cor_line = "#064E3B"  # Borda Escura
     else:
         situacao = "Em Andamento"
-        cor_fill = "#F59E0B"
-        cor_line = "#78350F"
+        cor_fill = "#F59E0B"  # Amarelo
+        cor_line = "#78350F"  # Borda Escura
         
     return pd.Series([situacao, cor_fill, cor_line])
 
@@ -150,7 +143,7 @@ def app():
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
-    # Filtros Padrão
+    # Filtros
     padrao_inicio = datetime.today().date()
     max_data = df_processado['Data Fim'].max().date()
     padrao_fim = max(padrao_inicio + timedelta(days=30), max_data)
@@ -172,6 +165,7 @@ def app():
 
     if not df_filtrado.empty:
         df_filtrado = df_filtrado.sort_values(by=['Data Início', 'Projeto'])
+        
         qtd_projetos = len(df_filtrado['Projeto'].unique())
         altura = max(300, qtd_projetos * 50)
 
@@ -205,16 +199,17 @@ def app():
             plot_bgcolor='rgba(0,0,0,0)',
             font=dict(color="white", family="sans-serif"),
             
-            # --- EIXO X (DIAS) ---
+            # --- EIXO X LIMPO ---
             xaxis=dict(
                 title=None,
-                tickformat="%d",     # Apenas 01, 02...
+                # Formato: 02/09 (linha de cima) | Seg (linha de baixo)
+                tickformat="%d/%m<br>%a", 
                 side="top",         
                 showgrid=True,
                 gridcolor='#333333',
                 dtick=86400000.0,    # 1 dia
                 range=[inicio, fim],
-                ticklabelmode="period", 
+                ticklabelmode="period", # Centraliza
                 tickcolor='white',
                 tickfont=dict(color='#cccccc', size=12)
             ),
@@ -228,57 +223,10 @@ def app():
                 type='category'
             ),
             
-            # --- MARGEM SUPERIOR GIGANTE (Para caber os meses sem sobrepor) ---
-            margin=dict(t=140, b=10, l=0, r=0),
+            margin=dict(t=60, b=10, l=0, r=0),
             showlegend=False,
             bargap=0.3
         )
-
-        # --- ANOTAÇÕES DE MESES (Com Y ajustado para cima) ---
-        # Lógica: Desenha o texto do mês manualmente acima do eixo de dias
-        
-        curr_mes = inicio.replace(day=1)
-        # Margem de segurança para o loop
-        loop_limit = fim + relativedelta(months=1)
-
-        while curr_mes <= loop_limit:
-            # Define o intervalo do mês corrente
-            inicio_mes = curr_mes
-            fim_mes = curr_mes + relativedelta(months=1) - timedelta(days=1)
-
-            # Intersecção: O que deste mês está visível na tela?
-            visivel_inicio = max(inicio, inicio_mes)
-            visivel_fim = min(fim, fim_mes)
-
-            # Se houver intersecção válida
-            if visivel_inicio <= visivel_fim:
-                # Calcula o ponto médio VISÍVEL (em datas)
-                # Convertendo para timestamp para média aritmética precisa
-                ts_inicio = visivel_inicio.toordinal()
-                ts_fim = visivel_fim.toordinal()
-                ts_meio = (ts_inicio + ts_fim) / 2
-                centro_visivel = datetime.fromordinal(int(ts_meio))
-                
-                # Nome do mês
-                nome_mes = f"{MAPA_MESES[curr_mes.month]} {curr_mes.year}".upper()
-
-                # Adiciona o texto BEM ACIMA do gráfico
-                # y=1.15 em relação ao topo da área de plotagem
-                fig.add_annotation(
-                    x=centro_visivel,
-                    y=1.20, # <--- ALTURA AJUSTADA PARA NÃO SOBREPOR
-                    yref="paper",
-                    text=nome_mes,
-                    showarrow=False,
-                    font=dict(color="white", size=14, weight="bold")
-                )
-                
-                # Opcional: Linha vertical sutil separando os meses
-                if visivel_inicio == inicio_mes and visivel_inicio > inicio:
-                     fig.add_vline(x=visivel_inicio, line_width=1, line_color="#444", line_dash="solid")
-
-            # Vai para o próximo mês
-            curr_mes += relativedelta(months=1)
 
         # Finais de Semana
         curr_date = inicio
