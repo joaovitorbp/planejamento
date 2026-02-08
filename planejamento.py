@@ -15,9 +15,11 @@ def get_proxima_semana():
 # --- Função Auxiliar: Situação e Cores ---
 def calcular_situacao_e_cores(row):
     hoje = datetime.now().date()
+    # Converte com segurança
     inicio = pd.to_datetime(row['Data Início']).date()
     fim = pd.to_datetime(row['Data Fim']).date()
     
+    # Lógica de Cores
     if inicio > hoje:
         situacao = "Não Iniciada"
         cor_fill = "#EF4444"  # Vermelho
@@ -201,8 +203,6 @@ def app():
             textposition='inside', 
             insidetextanchor='start',
             textfont=dict(color='white', weight='bold', size=13),
-            
-            # Garante que o texto seja mostrado mesmo se a barra for curta
             constraintext='none' 
         )
 
@@ -211,19 +211,15 @@ def app():
             plot_bgcolor='rgba(0,0,0,0)',
             font=dict(color="white", family="sans-serif"),
             
-            # --- EIXO X: CONFIGURAÇÃO DE "PERÍODO" ---
+            # --- EIXO X ---
             xaxis=dict(
                 title=None,
-                # Formato: 02/09 (linha de cima) Seg (linha de baixo)
                 tickformat="%d/%m<br>%a", 
                 side="top",         
                 showgrid=True,
                 gridcolor='#333333',
                 dtick=86400000.0, # 1 dia exato
-                
-                # A MÁGICA ACONTECE AQUI:
-                ticklabelmode="period", # <--- Centraliza o texto entre os traços
-                
+                ticklabelmode="period", # Texto centralizado no dia
                 range=[inicio, fim],
                 tickcolor='white',
                 tickfont=dict(color='#cccccc', size=12)
@@ -242,6 +238,22 @@ def app():
             showlegend=False,
             bargap=0.3
         )
+
+        # --- FINAIS DE SEMANA (SÁBADO e DOMINGO) ---
+        # Adiciona fundo mais claro (branco com transparência)
+        curr_date = inicio
+        while curr_date <= fim:
+            # 5 = Sábado, 6 = Domingo
+            if curr_date.weekday() in [5, 6]:
+                fig.add_vrect(
+                    x0=curr_date, 
+                    x1=curr_date + timedelta(days=1), 
+                    fillcolor="white", # <--- Cor clara
+                    opacity=0.08,      # <--- Transparência bem suave
+                    layer="below",     # Fica atrás das barras
+                    line_width=0
+                )
+            curr_date += timedelta(days=1)
 
         st.plotly_chart(fig, use_container_width=True)
         
