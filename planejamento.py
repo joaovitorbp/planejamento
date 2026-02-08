@@ -4,34 +4,14 @@ import pandas as pd
 import conexao
 from datetime import datetime, timedelta
 import calendar
-from dateutil.relativedelta import relativedelta
 
-# --- Função Auxiliar: Datas Padrão ---
+# --- Função Auxiliar: Datas Padrão (Para o Modal) ---
 def get_proxima_semana():
     hoje = datetime.now().date()
     dias_para_segunda = 7 - hoje.weekday()
     proxima_segunda = hoje + timedelta(days=dias_para_segunda)
     proxima_sexta = proxima_segunda + timedelta(days=4)
     return proxima_segunda, proxima_sexta
-
-# --- Função Auxiliar: Definir Filtros Rápidos ---
-def set_periodo(tipo):
-    hoje = datetime.now().date()
-    
-    if tipo == "mes_atual":
-        ultimo_dia = calendar.monthrange(hoje.year, hoje.month)[1]
-        st.session_state['filtro_ini'] = hoje.replace(day=1)
-        st.session_state['filtro_fim'] = hoje.replace(day=ultimo_dia)
-        
-    elif tipo == "prox_mes":
-        mes_que_vem = hoje + relativedelta(months=1)
-        ultimo_dia = calendar.monthrange(mes_que_vem.year, mes_que_vem.month)[1]
-        st.session_state['filtro_ini'] = mes_que_vem.replace(day=1)
-        st.session_state['filtro_fim'] = mes_que_vem.replace(day=ultimo_dia)
-        
-    elif tipo == "3_meses":
-        st.session_state['filtro_ini'] = hoje
-        st.session_state['filtro_fim'] = hoje + timedelta(days=90)
 
 # --- Função Auxiliar: Situação e Cores ---
 def calcular_situacao_e_cores(row):
@@ -163,31 +143,19 @@ def app():
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
-    # --- INICIALIZAÇÃO DOS FILTROS (SESSION STATE) ---
-    if 'filtro_ini' not in st.session_state:
-        st.session_state['filtro_ini'] = datetime.today().date()
-    if 'filtro_fim' not in st.session_state:
-        st.session_state['filtro_fim'] = datetime.today().date() + timedelta(days=30)
+    # --- FILTROS MANUAIS ---
+    # Padrão: HOJE até +30 dias
+    padrao_inicio = datetime.today().date()
+    # Garante limite superior
+    max_data = df_processado['Data Fim'].max().date()
+    padrao_fim = max(padrao_inicio + timedelta(days=30), max_data)
 
-    # --- BOTÕES DE FILTRO RÁPIDO ---
     st.markdown("### Visualização")
-    b1, b2, b3, space = st.columns([1, 1, 1, 3])
-    
-    if b1.button("📅 Mês Atual", use_container_width=True):
-        set_periodo("mes_atual")
-        st.rerun()
-    if b2.button("➡️ Próx. Mês", use_container_width=True):
-        set_periodo("prox_mes")
-        st.rerun()
-    if b3.button("📆 3 Meses", use_container_width=True):
-        set_periodo("3_meses")
-        st.rerun()
-
     f1, f2, f3 = st.columns([1, 1, 2])
     with f1:
-        inicio = st.date_input("De:", key="filtro_ini", format="DD/MM/YYYY")
+        inicio = st.date_input("De:", value=padrao_inicio, format="DD/MM/YYYY")
     with f2:
-        fim = st.date_input("Até:", key="filtro_fim", format="DD/MM/YYYY")
+        fim = st.date_input("Até:", value=padrao_fim, format="DD/MM/YYYY")
     with f3:
         situacoes = ["Não Iniciada", "Em Andamento", "Concluída"]
         filtro_situacao = st.multiselect("Filtrar Situação:", situacoes, default=situacoes)
@@ -234,10 +202,10 @@ def app():
             plot_bgcolor='rgba(0,0,0,0)',
             font=dict(color="white", family="sans-serif"),
             
-            # --- EIXO X (PONTO 2: Apenas Dia/Mês) ---
+            # Eixo X
             xaxis=dict(
                 title=None,
-                tickformat="%d/%m",  # Ex: 01/02
+                tickformat="%d/%m", # Ex: 01/02
                 side="top",         
                 showgrid=True,
                 gridcolor='#333333',
@@ -272,7 +240,7 @@ def app():
             yshift=10
         )
 
-        # --- ITERAÇÃO DIÁRIA ---
+        # --- LOOP PARA FIM DE SEMANA E SEPARADOR DE MÊS ---
         curr_date = inicio
         
         while curr_date <= fim:
@@ -287,22 +255,22 @@ def app():
                     line_width=0
                 )
             
-            # 2. SEPARADOR DE MÊS (PONTO 1: DESTAQUE)
+            # 2. SEPARADOR DE MÊS (Dia 01)
             if curr_date.day == 1:
-                # Linha Vertical Branca Sólida
+                # Linha
                 fig.add_vline(
                     x=curr_date, 
-                    line_width=2,         # Mais grossa
-                    line_color="#FFFFFF", # Branca
+                    line_width=2, 
+                    line_color="#FFFFFF", # Branca Sólida
                     opacity=0.6
                 )
-                # Nome do Mês em Destaque
+                # Texto do Mês
                 fig.add_annotation(
                     x=curr_date, y=0, yref="paper",
                     text=f"{curr_date.strftime('%b').upper()}", # JAN, FEV
                     showarrow=False,
-                    font=dict(color="#FFFFFF", size=14, weight="bold"), # Texto Branco Grande
-                    yshift=-30 # Um pouco abaixo do eixo
+                    font=dict(color="#FFFFFF", size=14, weight="bold"), 
+                    yshift=-30
                 )
 
             curr_date += timedelta(days=1)
