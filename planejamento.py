@@ -2,19 +2,29 @@ import streamlit as st
 import plotly.express as px
 import pandas as pd
 import conexao
-from datetime import datetime
+from datetime import datetime, timedelta
+
+# --- Função Auxiliar: Calcular Próxima Semana ---
+def get_proxima_semana():
+    hoje = datetime.now().date()
+    # 0 = Segunda, 6 = Domingo
+    dias_para_segunda = 7 - hoje.weekday()
+    proxima_segunda = hoje + timedelta(days=dias_para_segunda)
+    proxima_sexta = proxima_segunda + timedelta(days=4)
+    return proxima_segunda, proxima_sexta
 
 # --- Modal (Pop-up) de Agendamento ---
-# (Mantido igual - Lógica funcional)
 @st.dialog("Agendar Nova Atividade")
 def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     st.write("Novo Agendamento")
 
+    # Listas
     lista_projetos = df_obras['Projeto'].dropna().unique().tolist() if 'Projeto' in df_obras.columns else []
     lista_time = df_time['Nome'].dropna().unique().tolist() if not df_time.empty and 'Nome' in df_time.columns else []
     col_veic = 'Veículo' if 'Veículo' in df_frota.columns else 'Placa'
     lista_veiculos = df_frota[col_veic].dropna().unique().tolist() if not df_frota.empty else []
 
+    # Formulário
     projeto_selecionado = st.selectbox("Projeto", options=lista_projetos, index=None, placeholder="Selecione...")
 
     desc_auto = ""
@@ -27,11 +37,14 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     descricao = st.text_input("Descrição", value=desc_auto, disabled=True) 
     cliente = st.text_input("Cliente", value=cliente_auto, disabled=True) 
 
+    # --- DATAS PADRÃO: Próxima Seg e Sex ---
+    padrao_inicio, padrao_fim = get_proxima_semana()
+
     col1, col2 = st.columns(2)
     with col1:
-        data_inicio = st.date_input("Início", value=datetime.today(), format="DD/MM/YYYY")
+        data_inicio = st.date_input("Início", value=padrao_inicio, format="DD/MM/YYYY")
     with col2:
-        data_fim = st.date_input("Fim", value=datetime.today(), format="DD/MM/YYYY")
+        data_fim = st.date_input("Fim", value=padrao_fim, format="DD/MM/YYYY")
 
     executantes = st.multiselect("Executantes", options=lista_time)
     veiculo = st.selectbox("Veículo (Opcional)", options=lista_veiculos, index=None, placeholder="Selecione...")
@@ -50,7 +63,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
                 "Data Fim": data_fim.strftime('%Y-%m-%d'),
                 "Executantes": ", ".join(executantes),
                 "Veículo": veiculo if veiculo else "",
-                "Status": "Planejado"
+                "Status": "Planejado" # Padrão inicial
             }])
 
             if df_agenda_atual.empty:
@@ -59,6 +72,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
                 df_final = pd.concat([df_agenda_atual, nova_linha], ignore_index=True)
 
             try:
+                # Sanitização
                 df_final['Data Início'] = pd.to_datetime(df_final['Data Início'], dayfirst=True).dt.strftime('%Y-%m-%d')
                 df_final['Data Fim'] = pd.to_datetime(df_final['Data Fim'], dayfirst=True).dt.strftime('%Y-%m-%d')
                 df_final = df_final.fillna("")
@@ -88,6 +102,7 @@ def app():
     try:
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
+        # Força String para manter formato XXXX.XXXX
         df_agenda['Projeto'] = df_agenda['Projeto'].astype(str)
         df_processado = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
     except Exception as e:
@@ -111,21 +126,25 @@ def app():
     mask = (df_processado['Data Início'].dt.date >= inicio) & (df_processado['Data Fim'].dt.date <= fim)
     df_filtrado = df_processado.loc[mask]
 
-    # 3. VISUAL DARK MODE MINIMALISTA
+    # 3. VISUAL DARK MODE PREMIUM
     if not df_filtrado.empty:
-        # Ordenação
-        df_filtrado = df_filtrado.sort_values(by=['Projeto', 'Data Início'], ascending=[True, True])
+        # Ordenação: Data e Projeto
+        df_filtrado = df_filtrado.sort_values(by=['Data Início', 'Projeto'], ascending=[True, True])
         
         # Altura dinâmica
         qtd_projetos_unicos = len(df_filtrado['Projeto'].unique())
-        altura_grafico = max(300, qtd_projetos_unicos * 40) # 40px por linha
+        altura_grafico = max(300, qtd_projetos_unicos * 45)
 
-        # Cores Vibrantes (Neon) para contrastar com fundo escuro
-        cores_dark_mode = {
-            "Planejado": "#00B4D8",  # Ciano Neon
-            "Confirmado": "#F77F00", # Laranja Vivo
-            "Executado": "#2D6A4F",  # Verde Escuro (mas visível)
-            "Cancelado": "#D62828"   # Vermelho Sangue
+        # --- CORES SEMÂNTICAS ---
+        # Mapeamento exato do Status para as cores pedidas
+        cores_semanticas = {
+            "Planejado": "#EF4444",   # Vermelho (Ainda não iniciou)
+            "Confirmado": "#EAB308",  # Amarelo (Atenção/Próximo)
+            "Executando": "#EAB308",  # Amarelo (Em andamento)
+            "Em Andamento": "#EAB308",# Variação comum
+            "Executado": "#22C55E",   # Verde (Finalizado)
+            "Finalizado": "#22C55E",  # Variação comum
+            "Cancelado": "#6B7280"    # Cinza (Cancelado)
         }
 
         fig = px.timeline(
@@ -135,57 +154,70 @@ def app():
             y="Projeto",       
             color="Status",    
             text="Projeto",
-            color_discrete_map=cores_dark_mode,
+            color_discrete_map=cores_semanticas, # Aplica as cores
             height=altura_grafico,
-            hover_data={"Projeto":False, "Status":False} # Hover limpo
+            hover_data={"Projeto":False, "Status":False}
         )
 
         fig.update_layout(
-            # Fundo Transparente (Pega a cor do seu Streamlit Dark)
+            # Fundo Transparente
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
             
-            # Fonte Global
             font=dict(color="white", family="sans-serif"),
             
-            # Eixo X (Datas) - A única coisa que sobra fora a barra
+            # EIXO X: Dias individuais com Dia da Semana
             xaxis=dict(
                 title=None,
-                tickformat="%d/%m", 
+                # Formato: %a (Dia Semana abrev.) %d (Dia número). Ex: Seg 02
+                tickformat="%a %d/%m", 
                 side="top",         
                 showgrid=True,
-                gridcolor='#333333', # Grade cinza chumbo bem sutil
+                gridcolor='#404040', # Grade cinza escuro
                 gridwidth=1,
+                
+                # O PULO DO GATO: Força 1 tick por dia
+                dtick=86400000.0, # Milissegundos em 1 dia
+                
                 tickcolor='white',
-                tickfont=dict(color='#cccccc', size=12) # Texto cinza claro
+                tickfont=dict(color='#dddddd', size=11),
+                tickangle=0 # Deixa o texto reto se couber, ou use -45 se ficar apertado
             ),
             
-            # Eixo Y (Projetos) - TOTALMENTE OCULTO
+            # EIXO Y: Invisível (nomes dentro da barra)
             yaxis=dict(
                 title=None,
                 autorange="reversed", 
                 showgrid=False,
-                showticklabels=False, # <--- Remove os nomes da esquerda
-                visible=True, # Mantém eixo ativo para ordenação, mas invisível
+                showticklabels=False, 
+                visible=True,
                 type='category'
             ),
             
-            margin=dict(t=30, b=10, l=0, r=0), # Margem Zero nas laterais
-            showlegend=False, # <--- Remove Legenda
-            bargap=0.2
+            margin=dict(t=40, b=10, l=0, r=0),
+            showlegend=False,
+            bargap=0.3
         )
 
+        # --- ESTILO DAS BARRAS (Bordas e Arredondamento) ---
         fig.update_traces(
             textposition='inside', 
             insidetextanchor='start',
-            textfont=dict(color='white', weight='bold'), # Texto dentro da barra
-            marker_line_width=0,
+            textfont=dict(color='white', weight='bold', size=13),
+            
+            # Borda para destaque
+            marker_line_width=1.5,
+            marker_line_color='rgba(255,255,255,0.8)', # Borda quase branca
+            
+            # Arredondamento (Propriedade nova do Plotly)
+            # Se a versão do servidor for muito antiga, isso é ignorado, mas não quebra.
+            marker=dict(cornerradius=10), 
+            
             opacity=1
         )
 
         st.plotly_chart(fig, use_container_width=True)
         
-        # Tabela (Opcional, se quiser remover me avise, mantive pois é útil)
         st.divider()
         df_exibicao = df_filtrado.copy()
         df_exibicao["Data Início"] = df_exibicao["Data Início"].dt.date
