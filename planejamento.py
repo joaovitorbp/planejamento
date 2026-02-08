@@ -2,73 +2,85 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import plotly.express as px
-from googleapiclient.discovery import build
-from google.oauth2 import service_account
-from googleapiclient.http import MediaIoBaseDownload
-import io
 
-# ID do Excel (Orçamentos) - Esse precisa ficar aqui pois é arquivo solto no Drive
-ID_ARQUIVO_EXCEL = "dados_dashboard_obras.xlsx" 
-
-def download_excel_drive(file_id):
-    try:
-        # Pega as credenciais do TOML para acessar o Drive
-        creds_dict = dict(st.secrets["connections"]["gsheets"])
-        creds = service_account.Credentials.from_service_account_info(
-            creds_dict, scopes=['https://www.googleapis.com/auth/drive.readonly']
-        )
-        service = build('drive', 'v3', credentials=creds)
-        request = service.files().get_media(fileId=file_id)
-        file_io = io.BytesIO()
-        downloader = MediaIoBaseDownload(file_io, request)
-        done = False
-        while done is False:
-            status, done = downloader.next_chunk()
-        file_io.seek(0)
-        return pd.read_excel(file_io)
-    except:
-        return pd.DataFrame()
+# ==========================================
+# ⚠️ LINK DA PLANILHA DE ORÇAMENTOS (Antigo Excel)
+# ==========================================
+URL_ORCAMENTOS = "https://docs.google.com/spreadsheets/d/1CZQCkEnWLVxnwBqAtyMrV_WsiXU5XIvn/edit?gid=1069183619#gid=1069183619"
+# ==========================================
 
 def show_page():
     st.header("📅 Planejamento Geral")
     
-    # CONEXÃO INTELIGENTE: Lê o link direto do secrets.toml
+    # Conexão (Usa o secrets para a Agenda)
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     @st.cache_data(ttl=60)
     def load_data():
-        # Lê a aba Agenda (O link já está no secrets, não precisa por aqui)
+        # 1. Lê a Agenda (Do arquivo configurado no secrets.toml)
         df_agenda = conn.read(worksheet="Agenda", ttl=5)
         
-        # Lê o Excel do Drive
-        df_obras = download_excel_drive(ID_ARQUIVO_EXCEL)
-        
-        # Tratamento do Excel
-        if not df_obras.empty:
+        # 2. Lê a Planilha de Orçamentos (Pelo Link direto)
+        # Como é Google Sheets, lemos direto. Se a aba não for a primeira, precisaremos ajustar.
+        try:
+            df_obras = conn.read(spreadsheet=URL_ORCAMENTOS, ttl=600)
+            
+            # Tratamento de Colunas (Procura por ORÇAMENTO e LOCAL)
             c_orc = next((c for c in df_obras.columns if "ORÇAMENTO" in c.upper()), "ORÇAMENTO")
             c_loc = next((c for c in df_obras.columns if "LOCAL" in c.upper()), "LOCAL")
+            
             df_obras = df_obras.rename(columns={c_orc: 'Orcamento', c_loc: 'Cidade'})
             df_obras['Orcamento'] = df_obras['Orcamento'].astype(str)
+        except Exception as e:
+            st.warning(f"Não foi possível ler a lista de orçamentos: {e}")
+            df_obras = pd.DataFrame()
             
         return df_agenda, df_obras
 
-    df_agenda, df_obras = load_data()
+    try:
+        df_agenda, df_obras = load_data()
 
-    if not df_agenda.empty:
-        # Tratamento de dados
-        df_agenda["Data_Inicio"] = pd.to_datetime(df_agenda["Data_Inicio"], dayfirst=True, errors='coerce')
-        df_agenda["Data_Fim"] = pd.to_datetime(df_agenda["Data_Fim"], dayfirst=True, errors='coerce')
-        df_agenda["Orcamento"] = df_agenda["Orcamento"].astype(str)
+        if not df_agenda.empty:
+            # Tratamento de Tipos
+            df_agenda["Data_Inicio"] = pd.to_datetime(df_agenda["Data_Inicio"], dayfirst=True, errors='coerce')
+            df_agenda["Data_Fim"] = pd.to_datetime(df_agenda["Data_Fim"], dayfirst=True, errors='coerce')
+            df_agenda["Orcamento"] = df_agenda["Orcamento"].astype(str)
 
-        st.dataframe(df_agenda, use_container_width=True, hide_index=True)
-        
-        if not df_obras.empty:
-            st.subheader("Cronograma")
-            df_merged = df_agenda.merge(df_obras, on="Orcamento", how="left")
-            df_merged["Rotulo"] = df_merged["Orcamento"] + " - " + df_merged["Cidade"].fillna("")
+            # Filtro de Datas
+            col1, col2 = st.columns(2)
+            data_filtro = col1.date_input("Visualizar a partir de:", pd.to_datetime("today") - pd.Timedelta(weeks=1))
             
-            fig = px.timeline(df_merged, x_start="Data_Inicio", x_end="Data_Fim", y="Rotulo", color="Veiculo")
-            fig.update_yaxes(autorange="reversed")
-            st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("Nenhum dado encontrado.")
+            df_view = df_agenda[df_agenda["Data_Inicio"] >= pd.to_datetime(data_filtro)].copy()
+
+            # Tabela
+            st.dataframe(
+                df_view, 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={
+                    "Data_Inicio": st.column_config.DateColumn("Início", format="DD/MM/YYYY"),
+                    "Data_Fim": st.column_config.DateColumn("Fim", format="DD/MM/YYYY")
+                }
+            )
+            
+            # Gráfico de Gantt
+            if not df_obras.empty and not df_view.empty:
+                st.subheader("Cronograma Visual")
+                # Cruza dados da agenda com o nome da cidade
+                df_merged = df_view.merge(df_obras, on="Orcamento", how="left")
+                df_merged["Rotulo"] = df_merged["Orcamento"] + " - " + df_merged["Cidade"].fillna("")
+                
+                fig = px.timeline(
+                    df_merged, 
+                    x_start="Data_Inicio", x_end="Data_Fim", 
+                    y="Rotulo", 
+                    color="Veiculo",
+                    title="Cronograma de Obras"
+                )
+                fig.update_yaxes(autorange="reversed")
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Nenhum agendamento encontrado na base de dados.")
+            
+    except Exception as e:
+        st.error(f"Erro ao carregar dados: {e}")
