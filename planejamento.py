@@ -12,25 +12,40 @@ def get_proxima_semana():
     proxima_sexta = proxima_segunda + timedelta(days=4)
     return proxima_segunda, proxima_sexta
 
-# --- Função Auxiliar: Definir Situação e Cor ---
-def calcular_situacao(row):
+# --- Função Auxiliar: Definir Situação e Cores (Preenchimento e Borda) ---
+def calcular_situacao_e_cores(row):
     hoje = datetime.now().date()
-    inicio = row['Data Início'].date()
-    fim = row['Data Fim'].date()
+    # Garante conversão segura para date
+    inicio = pd.to_datetime(row['Data Início']).date()
+    fim = pd.to_datetime(row['Data Fim']).date()
 
+    # Lógica pedida:
+    # Inicio > Hoje (Futuro) -> Vermelho
+    # Termino < Hoje (Passado) -> Verde
+    # Inicio <= Hoje <= Termino (Presente) -> Amarelo
+    
     if inicio > hoje:
-        return "Não Iniciada"  # Futuro (Vermelho)
+        situacao = "Não Iniciada"
+        cor_fill = "#EF4444"  # Vermelho Fosco
+        cor_line = "#7F1D1D"  # Vermelho Escuro (Borda)
     elif fim < hoje:
-        return "Concluída"     # Passado (Verde)
+        situacao = "Concluída"
+        cor_fill = "#10B981"  # Verde Esmeralda
+        cor_line = "#064E3B"  # Verde Escuro (Borda)
     else:
-        return "Em Andamento"  # Presente (Amarelo)
+        situacao = "Em Andamento"
+        cor_fill = "#F59E0B"  # Amarelo/Laranja
+        cor_line = "#78350F"  # Marrom/Laranja Escuro (Borda)
+        
+    return pd.Series([situacao, cor_fill, cor_line])
 
-# --- Modal (Pop-up) de Agendamento ---
+# --- Modal (Pop-up) ---
 @st.dialog("Agendar Nova Atividade")
 def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     st.write("Novo Agendamento")
 
-    lista_projetos = df_obras['Projeto'].dropna().astype(str).unique().tolist() if 'Projeto' in df_obras.columns else []
+    # Listas
+    lista_projetos = df_obras['Projeto'].astype(str).dropna().unique().tolist() if 'Projeto' in df_obras.columns else []
     lista_time = df_time['Nome'].dropna().unique().tolist() if not df_time.empty and 'Nome' in df_time.columns else []
     col_veic = 'Veículo' if 'Veículo' in df_frota.columns else 'Placa'
     lista_veiculos = df_frota[col_veic].dropna().unique().tolist() if not df_frota.empty else []
@@ -40,15 +55,15 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     desc_auto = ""
     cliente_auto = ""
     if projeto_selecionado:
-        # Garante que compara string com string
-        dados = df_obras[df_obras['Projeto'].astype(str) == projeto_selecionado].iloc[0]
+        # Filtra como string para evitar erro
+        df_obras['Projeto'] = df_obras['Projeto'].astype(str)
+        dados = df_obras[df_obras['Projeto'] == str(projeto_selecionado)].iloc[0]
         desc_auto = dados.get('Descricao', "") 
         cliente_auto = f"{dados.get('Cliente', '')} - {dados.get('Cidade', '')}"
 
     descricao = st.text_input("Descrição", value=desc_auto, disabled=True) 
     cliente = st.text_input("Cliente", value=cliente_auto, disabled=True) 
 
-    # Datas Padrão: Próxima Seg e Sex
     padrao_inicio, padrao_fim = get_proxima_semana()
 
     col1, col2 = st.columns(2)
@@ -67,14 +82,14 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
 
         with st.spinner("Salvando..."):
             nova_linha = pd.DataFrame([{
-                "Projeto": str(projeto_selecionado), # Força String ao salvar
+                "Projeto": str(projeto_selecionado), # Força String
                 "Descrição": descricao,
                 "Cliente": cliente,
                 "Data Início": data_inicio.strftime('%Y-%m-%d'),
                 "Data Fim": data_fim.strftime('%Y-%m-%d'),
                 "Executantes": ", ".join(executantes),
                 "Veículo": veiculo if veiculo else "",
-                "Status": "Planejado" # Mantemos o status original no banco, mas a cor visual será calculada
+                "Status": "Planejado" 
             }])
 
             if df_agenda_atual.empty:
@@ -87,6 +102,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
                 df_final['Data Fim'] = pd.to_datetime(df_final['Data Fim'], dayfirst=True).dt.strftime('%Y-%m-%d')
                 df_final = df_final.fillna("")
                 conexao.salvar_no_sheets(df_final)
+                st.cache_data.clear() # Limpa cache para forçar atualização
                 st.success("Salvo!")
                 st.rerun()
             except Exception as e:
@@ -97,8 +113,10 @@ def app():
     col1, col2 = st.columns([3, 1])
     col1.header("📅 Cronograma")
 
-    with st.spinner("Lendo dados..."):
-        df_agenda, df_frota, df_time, df_obras = conexao.carregar_dados()
+    # Carrega dados e CRIA CÓPIA para evitar problema de cache
+    df_raw, df_frota, df_time, df_obras_raw = conexao.carregar_dados()
+    df_agenda = df_raw.copy()
+    df_obras = df_obras_raw.copy()
 
     with col2:
         if st.button("➕ Agendar", use_container_width=True):
@@ -108,13 +126,14 @@ def app():
         st.info("Nenhum agendamento.")
         return
 
-    # 1. Tratamento de Dados
+    # 1. Tratamento de Dados (Forçar Tipos)
     try:
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
         
-        # --- CORREÇÃO PONTO 1: Forçar String no Projeto ---
-        df_agenda['Projeto'] = df_agenda['Projeto'].astype(str)
+        # Converte Projeto para String (Remove .0 se vier do Excel como float)
+        # Ex: 1001.0 -> "1001" | "1001.2002" -> "1001.2002"
+        df_agenda['Projeto'] = df_agenda['Projeto'].astype(str).str.replace(r'\.0$', '', regex=True)
         
         df_processado = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
     except Exception as e:
@@ -125,26 +144,22 @@ def app():
         st.warning("Sem dados válidos.")
         return
 
-    # 2. Lógica de Cores Automática (Calcula coluna 'Situacao')
-    df_processado['Situacao'] = df_processado.apply(calcular_situacao, axis=1)
+    # 2. Aplica a Lógica de Cores e Situação
+    # Cria 3 colunas novas: Situacao, CorFill, CorLine
+    df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
-    # 3. Filtros (Datas e Situação)
+    # 3. Filtros
     min_date = df_processado['Data Início'].min().date()
     max_date = df_processado['Data Fim'].max().date()
     
-    # Linha de Filtros
-    f1, f2, f3 = st.columns([1, 1, 2])
-    with f1:
+    c_ini, c_fim, c_filtro = st.columns([1, 1, 2])
+    with c_ini:
         inicio = st.date_input("De:", value=min_date, format="DD/MM/YYYY")
-    with f2:
+    with c_fim:
         fim = st.date_input("Até:", value=max_date, format="DD/MM/YYYY")
-    with f3:
-        # --- CORREÇÃO PONTO 4: Filtro de Situação ---
-        filtro_situacao = st.multiselect(
-            "Filtrar Situação:", 
-            options=["Não Iniciada", "Em Andamento", "Concluída"],
-            default=["Não Iniciada", "Em Andamento", "Concluída"] # Mostra tudo por padrão
-        )
+    with c_filtro:
+        situacoes_disponiveis = ["Não Iniciada", "Em Andamento", "Concluída"]
+        filtro_situacao = st.multiselect("Filtrar Situação:", situacoes_disponiveis, default=situacoes_disponiveis)
 
     # Aplica Filtros
     mask = (df_processado['Data Início'].dt.date >= inicio) & \
@@ -153,51 +168,57 @@ def app():
     
     df_filtrado = df_processado.loc[mask]
 
-    # 4. VISUALIZAÇÃO
+    # 4. GRÁFICO FINAL
     if not df_filtrado.empty:
         # Ordenação
-        df_filtrado = df_filtrado.sort_values(by=['Data Início', 'Projeto'], ascending=[True, True])
+        df_filtrado = df_filtrado.sort_values(by=['Data Início', 'Projeto'])
         
-        # Altura dinâmica
-        qtd_projetos_unicos = len(df_filtrado['Projeto'].unique())
-        altura_grafico = max(300, qtd_projetos_unicos * 45)
+        qtd_projetos = len(df_filtrado['Projeto'].unique())
+        altura = max(300, qtd_projetos * 45)
 
-        # --- CORREÇÃO PONTO 2: Cores Condicionais ---
-        cores_condicionais = {
-            "Não Iniciada": "#EF4444",  # Vermelho (Futuro)
-            "Em Andamento": "#EAB308",  # Amarelo (Presente)
-            "Concluída": "#22C55E"      # Verde (Passado)
-        }
-
+        # Como queremos cores específicas por LINHA (baseado na data) e não por categoria fixa,
+        # O jeito mais robusto no Plotly é passar a coluna de cor diretamente.
+        
         fig = px.timeline(
             df_filtrado, 
             x_start="Data Início", 
             x_end="Data Fim", 
-            y="Projeto",       
-            color="Situacao",  # <--- Usa a coluna calculada, não o Status do banco
+            y="Projeto",
             text="Projeto",
-            color_discrete_map=cores_condicionais,
-            height=altura_grafico,
-            hover_data={"Projeto":False, "Situacao":False}
+            height=altura,
+            hover_data={"Projeto": False, "Situacao": True, "CorFill": False}
+        )
+
+        # APLICANDO AS CORES MANUALMENTE
+        # O Plotly Express as vezes briga com cores por linha, então atualizamos o trace direto.
+        fig.update_traces(
+            marker=dict(
+                color=df_filtrado['CorFill'], # Cor do preenchimento calculada
+                line=dict(
+                    color=df_filtrado['CorLine'], # Cor da borda calculada (mais escura)
+                    width=3 # Borda grossa para destaque
+                ),
+                cornerradius=5 # Arredondamento
+            ),
+            textposition='inside', 
+            insidetextanchor='start',
+            textfont=dict(color='white', weight='bold', size=14)
         )
 
         fig.update_layout(
-            paper_bgcolor='rgba(0,0,0,0)', # Transparente
+            paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
-            
             font=dict(color="white", family="sans-serif"),
             
-            # --- CORREÇÃO PONTO 3 (Eixo X): Dia Semana + 1 tick por dia ---
             xaxis=dict(
                 title=None,
                 tickformat="%a %d/%m", # Seg 02/09
                 side="top",         
                 showgrid=True,
                 gridcolor='#333333',
-                gridwidth=1,
-                dtick=86400000.0, # <--- Força 1 dia exato
+                dtick=86400000.0, # 1 dia exato
                 tickcolor='white',
-                tickfont=dict(color='#dddddd', size=11)
+                tickfont=dict(color='#cccccc')
             ),
             
             yaxis=dict(
@@ -206,41 +227,19 @@ def app():
                 showgrid=False,
                 showticklabels=False, 
                 visible=True,
-                type='category' # Garante formato texto
+                type='category'
             ),
             
-            margin=dict(t=50, b=10, l=0, r=0),
-            showlegend=False, # Sem legenda
+            margin=dict(t=40, b=10, l=0, r=0),
+            showlegend=False,
             bargap=0.3
-        )
-
-        # --- ESTILO DAS BARRAS (Borda Escura e Arredondada) ---
-        fig.update_traces(
-            textposition='inside', 
-            insidetextanchor='start',
-            textfont=dict(color='white', weight='bold', size=13),
-            
-            # --- CORREÇÃO PONTO 3 (Borda): Preto com 50% transp ---
-            # Isso cria automaticamente um tom "mais escuro" da cor da barra
-            marker_line_width=2,
-            marker_line_color='rgba(0, 0, 0, 0.5)', 
-            
-            # Arredondamento
-            marker=dict(cornerradius=5), 
-            
-            opacity=1
         )
 
         st.plotly_chart(fig, use_container_width=True)
         
         st.divider()
-        # Tabela Auxiliar
-        df_exibicao = df_filtrado.copy()
-        df_exibicao["Data Início"] = df_exibicao["Data Início"].dt.date
-        df_exibicao["Data Fim"] = df_exibicao["Data Fim"].dt.date
-        
         st.dataframe(
-            df_exibicao[["Projeto", "Data Início", "Data Fim", "Situacao", "Veículo"]], 
+            df_filtrado[["Projeto", "Data Início", "Data Fim", "Situacao", "Veículo"]], 
             use_container_width=True, 
             hide_index=True
         )
