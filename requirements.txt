@@ -5,3 +5,4 @@ gspread
 openpyxl
 google-api-python-client
 google-auth
+streamlit-timeline
