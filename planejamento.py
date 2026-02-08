@@ -3,7 +3,14 @@ import plotly.express as px
 import pandas as pd
 import conexao
 from datetime import datetime, timedelta
-from dateutil.relativedelta import relativedelta # Importante para manipular meses
+from dateutil.relativedelta import relativedelta # Necessário para pular meses
+
+# --- Mapeamento de Meses (Garante Português em qualquer servidor) ---
+MAPA_MESES = {
+    1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril",
+    5: "Maio", 6: "Junho", 7: "Julho", 8: "Agosto",
+    9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro"
+}
 
 # --- Função Auxiliar: Datas Padrão ---
 def get_proxima_semana():
@@ -36,36 +43,6 @@ def calcular_situacao_e_cores(row):
         cor_line = "#78350F"
         
     return pd.Series([situacao, cor_fill, cor_line])
-
-# --- Função para Gerar Eixo de Meses Manualmente ---
-def gerar_eixo_meses(data_inicio, data_fim):
-    """
-    Gera ticks manuais para garantir que o mês apareça mesmo se o dia 1 não estiver visível.
-    """
-    ticks_vals = []
-    ticks_text = []
-    
-    # Começa do primeiro dia do mês da data inicial
-    curr = data_inicio.replace(day=1)
-    
-    while curr <= data_fim:
-        # Ponto central do mês (dia 15) para posicionar o texto, ou o próprio dia 1
-        # Usaremos o dia 15 para tentar centralizar visualmente
-        centro_mes = curr + timedelta(days=14)
-        
-        # Se o centro do mês estiver dentro (ou perto) do range, adicionamos
-        # Se não, forçamos o rótulo no meio do range visível daquele mês
-        
-        # Lógica simplificada: Coloca o rótulo no dia 1 de cada mês
-        # E se o dia 1 não estiver visível (ex: filtro dia 10 a 20),
-        # Adiciona um rótulo no dia inicial do filtro.
-        
-        ticks_vals.append(curr) # Marca o início do mês (grade)
-        
-        # Avança para o próximo mês
-        curr += relativedelta(months=1)
-
-    return ticks_vals
 
 # --- Modal (Pop-up) ---
 @st.dialog("Agendar Nova Atividade")
@@ -111,7 +88,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
         if not data_fim: erros.append("Data Fim")
 
         if erros:
-            st.error(f"Campos obrigatórios: {', '.join(erros)}")
+            st.error(f"Preencha os campos obrigatórios: {', '.join(erros)}")
             return
 
         with st.spinner("Salvando..."):
@@ -174,9 +151,10 @@ def app():
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
-    # Filtros Padrão: HOJE até +30 dias
-    padrao_inicio = datetime.today().date()
-    # Garante que mostre pelo menos 1 mês ou até o fim dos dados
+    # --- Filtros Padrão: HOJE (Início) até +30 dias ---
+    padrao_inicio = datetime.today().date() # HOJE como padrão
+    
+    # Define limite superior
     max_data = df_processado['Data Fim'].max().date()
     padrao_fim = max(padrao_inicio + timedelta(days=30), max_data)
 
@@ -234,32 +212,15 @@ def app():
             # --- EIXO X (DIAS) ---
             xaxis=dict(
                 title=None,
-                tickformat="%d", # Só o dia (01, 02)
+                tickformat="%d",     # Apenas 01, 02...
                 side="top",         
                 showgrid=True,
                 gridcolor='#333333',
-                dtick=86400000.0, # 1 dia exato
+                dtick=86400000.0,    # 1 dia exato
                 range=[inicio, fim],
-                ticklabelmode="period", # Centraliza o número do dia no espaço
+                ticklabelmode="period", # Centraliza
                 tickcolor='white',
                 tickfont=dict(color='#cccccc', size=12)
-            ),
-            
-            # --- EIXO X2 (MESES) - Configuração Robusta ---
-            xaxis2=dict(
-                title=None,
-                overlaying="x",
-                side="top",
-                tickformat="%B %Y", # Fevereiro 2026
-                # dtick="M1" as vezes falha em views curtas.
-                # Aqui usamos dtick numérico (milissegundos) aproximado para forçar a aparição
-                # Mas o "ticklabelmode=period" com overlay funciona melhor se o range for sincronizado.
-                dtick="M1", 
-                ticklabelmode="period",
-                showgrid=False,
-                range=[inicio, fim],
-                tickfont=dict(color='#ffffff', size=15, weight="bold"),
-                position=1
             ),
             
             yaxis=dict(
@@ -271,10 +232,53 @@ def app():
                 type='category'
             ),
             
+            # Margem topo maior para caber o texto dos meses
             margin=dict(t=80, b=10, l=0, r=0),
             showlegend=False,
             bargap=0.3
         )
+
+        # --- A MÁGICA DOS MESES (ANOTAÇÕES MANUAIS) ---
+        # Percorre mês a mês dentro do intervalo selecionado
+        # e coloca o nome do mês centralizado na parte VISÍVEL dele.
+        
+        curr_mes = inicio.replace(day=1)
+        fim_ajustado = fim + relativedelta(days=1) # Margem segurança
+
+        while curr_mes <= fim:
+            # Inicio e Fim real do mês
+            inicio_mes = curr_mes
+            fim_mes = curr_mes + relativedelta(months=1) - timedelta(days=1)
+
+            # Qual parte do mês está visível na tela?
+            visivel_inicio = max(inicio, inicio_mes)
+            visivel_fim = min(fim, fim_mes)
+
+            # Se o mês tem alguma parte visível
+            if visivel_inicio <= visivel_fim:
+                # Calcula o ponto central (em datas)
+                dias_diff = (visivel_fim - visivel_inicio).days
+                centro_visivel = visivel_inicio + timedelta(days=dias_diff / 2)
+                
+                # Nome do mês em PT-BR
+                nome_mes = f"{MAPA_MESES[curr_mes.month]} {curr_mes.year}"
+
+                # Adiciona texto flutuante no topo
+                fig.add_annotation(
+                    x=centro_visivel,
+                    y=1.08, # Um pouco acima do gráfico (eixo Y relativo ao papel)
+                    yref="paper",
+                    text=nome_mes,
+                    showarrow=False,
+                    font=dict(color="white", size=14, weight="bold")
+                )
+                
+                # Opcional: Linha separadora de meses
+                if visivel_inicio == inicio_mes and visivel_inicio > inicio:
+                     fig.add_vline(x=visivel_inicio, line_width=1, line_color="#555", line_dash="dot")
+
+            # Avança para o próximo mês
+            curr_mes += relativedelta(months=1)
 
         # Finais de Semana
         curr_date = inicio
