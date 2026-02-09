@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import calendar
 import pytz 
 
-# --- CONFIGURAÇÃO DE ESTILO (CSS) ---
+# --- CONFIGURAÇÃO DE ESTILO (CSS REFINADO) ---
 def aplicar_estilo():
     st.markdown("""
         <style>
@@ -27,14 +27,14 @@ def aplicar_estilo():
             color: white !important;
         }
         
-        /* 3. Botão de Edição (Estilo Texto/Link) */
+        /* 3. Botão de Edição (Estilo Texto/Link Minimalista) */
         div.stButton > button[kind="secondary"] {
             border: 1px solid #444;
-            color: #ddd; /* Cor do ícone */
+            color: #ddd;
             background-color: transparent;
             height: auto;
-            padding-top: 5px;
-            padding-bottom: 5px;
+            padding: 2px 8px; /* Compacto */
+            font-size: 14px;
         }
         div.stButton > button[kind="secondary"]:hover {
             border-color: #002B5B;
@@ -42,17 +42,22 @@ def aplicar_estilo():
             background-color: #002B5B;
         }
         
-        /* 4. REDUÇÃO DE ESPAÇAMENTO DA TABELA (HR) */
+        /* 4. COMPACTAÇÃO EXTREMA DA TABELA */
+        /* Remove margens extras dos textos dentro das colunas */
+        div[data-testid="stMarkdownContainer"] p {
+            font-size: 14px;
+            margin-bottom: 0px !important;
+        }
+        
+        /* Linha divisória fina e sem margem */
         hr {
-            margin-top: 0.2rem !important;
-            margin-bottom: 0.2rem !important;
+            margin: 2px 0px !important; /* Margem quase zero */
             border-color: #333;
         }
         
-        /* Ajuste fino para compactar texto nas colunas */
-        div[data-testid="stText"] {
-            font-size: 14px;
-            margin-bottom: 0px;
+        /* Ajuste do container da linha para reduzir gap vertical */
+        div[data-testid="column"] {
+            padding-bottom: 0px !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -90,6 +95,7 @@ def calcular_situacao_e_cores(row):
         situacao = "Em Andamento"
         cor_fill = "#F59E0B"
         cor_line = "#78350F"
+        
     return pd.Series([situacao, cor_fill, cor_line])
 
 # --- DIALOGS ---
@@ -323,13 +329,7 @@ def app():
         )
         
         fig.update_layout(
-            hoverlabel=dict(
-                bgcolor="#333333", 
-                font_color="white", 
-                font_size=12, 
-                font_family="sans-serif",
-                bordercolor="#333333"
-            )
+            hoverlabel=dict(bgcolor="#333333", font_color="white", font_size=12, font_family="sans-serif", bordercolor="#333333")
         )
         
         fig.update_traces(
@@ -383,16 +383,17 @@ def app():
             bargap=0.2 
         )
 
-        # HOJE na parte de BAIXO (y=0) com ajuste visual
+        # HOJE: COLADO NA BORDA INFERIOR
         fig.add_vrect(x0=hoje, x1=hoje + timedelta(days=1), fillcolor="#00FFFF", opacity=0.15, layer="below", line_width=0)
         fig.add_annotation(
             x=hoje, 
-            y=0, # Parte de baixo
+            y=0, # Base
             yref="paper", 
+            yanchor="bottom", # Ancora pela base para colar na linha
             text="HOJE", 
             showarrow=False, 
             font=dict(color="#00FFFF", weight="bold"), 
-            yshift=10, # Sobe um pouquinho pra não colar na linha
+            yshift=0, # Zero deslocamento
             xshift=20
         )
 
@@ -415,8 +416,9 @@ def app():
         st.divider()
         st.subheader("Detalhamento das Atividades")
         
-        # --- TABELA CUSTOMIZADA ---
-        c_proj, c_desc, c_cli, c_ini, c_fim, c_equipe, c_acao = st.columns([2, 3, 2, 1.2, 1.2, 2, 0.8])
+        # --- TABELA COMPACTA, ALINHADA E UNIFORME ---
+        # Cabeçalho
+        c_proj, c_desc, c_cli, c_ini, c_fim, c_equipe, c_acao = st.columns([2, 3, 2, 1.2, 1.2, 2, 0.8], vertical_alignment="center")
         c_proj.markdown("**Projeto**")
         c_desc.markdown("**Descrição**")
         c_cli.markdown("**Cliente**")
@@ -425,13 +427,20 @@ def app():
         c_equipe.markdown("**Equipe**")
         c_acao.markdown("**Editar**")
         
-        st.markdown("<hr>", unsafe_allow_html=True) # Separador compacto
+        st.markdown("<hr>", unsafe_allow_html=True) 
 
         for idx, row in df_filtrado.iterrows():
             with st.container():
-                c1, c2, c3, c4, c5, c6, c7 = st.columns([2, 3, 2, 1.2, 1.2, 2, 0.8])
-                c1.write(f"**{row['Projeto']}**")
-                c2.caption(f"{row['Descrição'][:50]}..." if len(row['Descrição']) > 50 else row['Descrição'])
+                # vertical_alignment="center" garante que tudo fique centralizado no eixo Y
+                c1, c2, c3, c4, c5, c6, c7 = st.columns([2, 3, 2, 1.2, 1.2, 2, 0.8], vertical_alignment="center")
+                
+                # Texto uniforme: Todos usam st.write para manter a mesma fonte/cor
+                c1.write(f"{row['Projeto']}")
+                
+                # Truncar descrição apenas visualmente
+                desc_curta = f"{row['Descrição'][:40]}..." if len(row['Descrição']) > 40 else row['Descrição']
+                c2.write(desc_curta, help=row['Descrição']) # help mostra o tooltip nativo se precisar
+                
                 c3.write(row['Cliente'])
                 c4.write(row['Inicio_Fmt'])
                 c5.write(row['Fim_Fmt'])
@@ -441,7 +450,7 @@ def app():
                 if c7.button("✎", key=f"btn_edit_{idx}", type="secondary", use_container_width=True):
                     modal_editar_atividade(idx, df_agenda, lista_time_completa)
                 
-                st.markdown("<hr>", unsafe_allow_html=True) # Separador compacto
+                st.markdown("<hr>", unsafe_allow_html=True) 
 
     else:
         st.info("Nenhuma atividade encontrada.")
