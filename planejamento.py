@@ -6,11 +6,11 @@ from datetime import datetime, timedelta
 import calendar
 import pytz 
 
-# --- CONFIGURAÇÃO DE ESTILO (CSS SEGURO) ---
+# --- CONFIGURAÇÃO DE ESTILO (CSS) ---
 def aplicar_estilo():
     st.markdown("""
         <style>
-        /* 1. Botões Primários (Salvar/Novo) em Azul Escuro */
+        /* 1. Botões Primários (Azul Escuro) */
         div.stButton > button[kind="primary"] {
             background-color: #002B5B !important;
             border-color: #002B5B !important;
@@ -21,31 +21,38 @@ def aplicar_estilo():
             border-color: #004080 !important;
         }
         
-        /* 2. Tags do MultiSelect em Azul Escuro */
+        /* 2. Tags do MultiSelect (Azul Escuro) */
         span[data-baseweb="tag"] {
             background-color: #002B5B !important;
             color: white !important;
         }
         
-        /* 3. Botão de Edição (Lápis) - Estilo Discreto */
+        /* 3. Botão de Edição (Estilo Texto/Link) */
         div.stButton > button[kind="secondary"] {
             border: 1px solid #444;
-            color: #ddd;
+            color: #ddd; /* Cor do ícone */
+            background-color: transparent;
             height: auto;
             padding-top: 5px;
             padding-bottom: 5px;
         }
         div.stButton > button[kind="secondary"]:hover {
             border-color: #002B5B;
-            color: #002B5B;
-            background-color: #f0f2f6;
+            color: white;
+            background-color: #002B5B;
         }
         
-        /* 4. Linhas de separação mais sutis */
+        /* 4. REDUÇÃO DE ESPAÇAMENTO DA TABELA (HR) */
         hr {
-            margin-top: 0.5rem;
-            margin-bottom: 0.5rem;
+            margin-top: 0.2rem !important;
+            margin-bottom: 0.2rem !important;
             border-color: #333;
+        }
+        
+        /* Ajuste fino para compactar texto nas colunas */
+        div[data-testid="stText"] {
+            font-size: 14px;
+            margin-bottom: 0px;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -111,11 +118,9 @@ def modal_editar_atividade(index_original, df_full, lista_time):
         st.error("Atividade não encontrada.")
         return
 
-    # Info não editável para contexto
     st.caption(f"Projeto: {dados_atuais['Projeto']} | Cliente: {dados_atuais['Cliente']}")
     st.text_input("Descrição", value=dados_atuais['Descrição'], disabled=True)
 
-    # Datas
     try:
         dt_ini_atual = pd.to_datetime(dados_atuais['Data Início'], dayfirst=True).date()
         dt_fim_atual = pd.to_datetime(dados_atuais['Data Fim'], dayfirst=True).date()
@@ -127,7 +132,6 @@ def modal_editar_atividade(index_original, df_full, lista_time):
     with c1: nova_data_ini = st.date_input("Início", value=dt_ini_atual, format="DD/MM/YYYY")
     with c2: nova_data_fim = st.date_input("Fim", value=dt_fim_atual, format="DD/MM/YYYY")
 
-    # Equipe
     equipe_atual = []
     if isinstance(dados_atuais['Executantes'], str):
         equipe_atual = [x.strip() for x in dados_atuais['Executantes'].split(',')]
@@ -145,7 +149,6 @@ def modal_editar_atividade(index_original, df_full, lista_time):
             df_full.at[index_original, 'Data Fim'] = nova_data_fim.strftime('%d/%m/%Y')
             df_full.at[index_original, 'Executantes'] = ", ".join(novos_executantes)
             
-            # Re-formata
             df_full['Data Início'] = pd.to_datetime(df_full['Data Início'], dayfirst=True).dt.strftime('%d/%m/%Y')
             df_full['Data Fim'] = pd.to_datetime(df_full['Data Fim'], dayfirst=True).dt.strftime('%d/%m/%Y')
             df_full = df_full.fillna("")
@@ -227,7 +230,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
 
 # --- APP PRINCIPAL ---
 def app():
-    aplicar_estilo() 
+    aplicar_estilo()
     
     col_titulo, col_btn = st.columns([4, 1])
     col_titulo.header("Cronograma")
@@ -252,7 +255,7 @@ def app():
         df_agenda['Projeto'] = df_agenda['Projeto'].astype(str).str.replace(r'\.0$', '', regex=True)
         df_processado = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
     except Exception as e:
-        st.error(f"Erro de processamento: {e}")
+        st.error(f"Erro: {e}")
         return
 
     if df_processado.empty:
@@ -265,13 +268,11 @@ def app():
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
-    # --- ESTADO ---
     hoje = get_hoje()
     if 'view_mode' not in st.session_state: st.session_state['view_mode'] = '30d'
     if 'zoom_ini' not in st.session_state: st.session_state['zoom_ini'] = hoje
     if 'zoom_fim' not in st.session_state: st.session_state['zoom_fim'] = hoje + timedelta(days=30)
 
-    # --- COMANDOS ---
     st.divider()
     c_botoes, c_status = st.columns([2, 1])
     
@@ -318,11 +319,9 @@ def app():
             y="Projeto",
             text="Projeto",
             height=altura_final,
-            # Passando dados customizados para o Hover
             custom_data=['Inicio_Fmt', 'Fim_Fmt', 'Cliente', 'Descrição', 'Executantes']
         )
         
-        # HOVER: Fundo Escuro (#333) e Texto Branco
         fig.update_layout(
             hoverlabel=dict(
                 bgcolor="#333333", 
@@ -344,7 +343,7 @@ def app():
             marker=dict(
                 color=df_filtrado['CorFill'],
                 line=dict(color=df_filtrado['CorLine'], width=1),
-                cornerradius=10
+                cornerradius=10 
             ),
             textposition='inside', 
             insidetextanchor='start',
@@ -384,8 +383,18 @@ def app():
             bargap=0.2 
         )
 
+        # HOJE na parte de BAIXO (y=0) com ajuste visual
         fig.add_vrect(x0=hoje, x1=hoje + timedelta(days=1), fillcolor="#00FFFF", opacity=0.15, layer="below", line_width=0)
-        fig.add_annotation(x=hoje, y=1, yref="paper", text="HOJE", showarrow=False, font=dict(color="#00FFFF", weight="bold"), yshift=10, xshift=20)
+        fig.add_annotation(
+            x=hoje, 
+            y=0, # Parte de baixo
+            yref="paper", 
+            text="HOJE", 
+            showarrow=False, 
+            font=dict(color="#00FFFF", weight="bold"), 
+            yshift=10, # Sobe um pouquinho pra não colar na linha
+            xshift=20
+        )
 
         min_dados = df_filtrado['Data Início'].min().date()
         max_dados = df_filtrado['Data Fim'].max().date()
@@ -406,8 +415,7 @@ def app():
         st.divider()
         st.subheader("Detalhamento das Atividades")
         
-        # --- TABELA CUSTOMIZADA COM BOTÕES DE EDIÇÃO ---
-        # Cabeçalho
+        # --- TABELA CUSTOMIZADA ---
         c_proj, c_desc, c_cli, c_ini, c_fim, c_equipe, c_acao = st.columns([2, 3, 2, 1.2, 1.2, 2, 0.8])
         c_proj.markdown("**Projeto**")
         c_desc.markdown("**Descrição**")
@@ -417,14 +425,11 @@ def app():
         c_equipe.markdown("**Equipe**")
         c_acao.markdown("**Editar**")
         
-        st.markdown("---") # Linha separadora do header
+        st.markdown("<hr>", unsafe_allow_html=True) # Separador compacto
 
-        # Linhas de Dados
         for idx, row in df_filtrado.iterrows():
             with st.container():
                 c1, c2, c3, c4, c5, c6, c7 = st.columns([2, 3, 2, 1.2, 1.2, 2, 0.8])
-                
-                # Exibição dos dados
                 c1.write(f"**{row['Projeto']}**")
                 c2.caption(f"{row['Descrição'][:50]}..." if len(row['Descrição']) > 50 else row['Descrição'])
                 c3.write(row['Cliente'])
@@ -432,12 +437,11 @@ def app():
                 c5.write(row['Fim_Fmt'])
                 c6.write(row['Executantes'])
                 
-                # Botão de Edição com ícone de lápis
-                if c7.button("✏️", key=f"btn_edit_{idx}", type="secondary", use_container_width=True):
-                    # Passa o índice original (idx do DataFrame) para editar a linha certa
+                # Ícone "Sem Cor" (Texto Unicode)
+                if c7.button("✎", key=f"btn_edit_{idx}", type="secondary", use_container_width=True):
                     modal_editar_atividade(idx, df_agenda, lista_time_completa)
                 
-                st.markdown("---") # Linha separadora entre itens
+                st.markdown("<hr>", unsafe_allow_html=True) # Separador compacto
 
     else:
         st.info("Nenhuma atividade encontrada.")
