@@ -12,7 +12,7 @@ FUSO_BR = pytz.timezone('America/Sao_Paulo')
 def get_hoje():
     return datetime.now(FUSO_BR).date()
 
-# --- FUNÇÕES AUXILIARES ---
+# --- Função Auxiliar: Datas Padrão ---
 def get_proxima_semana():
     hoje = get_hoje()
     dias_para_segunda = 7 - hoje.weekday()
@@ -20,11 +20,12 @@ def get_proxima_semana():
     proxima_sexta = proxima_segunda + timedelta(days=4)
     return proxima_segunda, proxima_sexta
 
+# --- Função Auxiliar: Situação e Cores ---
 def calcular_situacao_e_cores(row):
     hoje = get_hoje()
     try:
-        inicio = pd.to_datetime(row['Data Início']).date()
-        fim = pd.to_datetime(row['Data Fim']).date()
+        inicio = pd.to_datetime(row['Data Início'], dayfirst=True).date()
+        fim = pd.to_datetime(row['Data Fim'], dayfirst=True).date()
     except:
         return pd.Series(["Erro", "#000", "#000"])
     
@@ -101,23 +102,26 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
             return
         
         with st.spinner("Salvando..."):
-            # CORREÇÃO PONTO 2: Força formato string BR para não inverter no Sheets
+            # PONTO 2: SALVAR COMO DD/MM/YYYY (String BR)
             nova_linha = pd.DataFrame([{
                 "Projeto": str(projeto_selecionado),
                 "Descrição": descricao,
                 "Cliente": cliente,
-                "Data Início": data_inicio.strftime('%d/%m/%Y'),
-                "Data Fim": data_fim.strftime('%d/%m/%Y'),
+                "Data Início": data_inicio.strftime('%d/%m/%Y'), # Força DD/MM
+                "Data Fim": data_fim.strftime('%d/%m/%Y'),       # Força DD/MM
                 "Executantes": ", ".join(executantes),
                 "Veículo": veiculo if veiculo else "",
                 "Status": "Planejado" 
             }])
+            
             if df_agenda_atual.empty: df_final = nova_linha
             else: df_final = pd.concat([df_agenda_atual, nova_linha], ignore_index=True)
+            
             try:
-                # Garante que tudo seja string DD/MM/YYYY antes de salvar
+                # Garante formatação consistente antes de enviar pro Sheets
                 df_final['Data Início'] = pd.to_datetime(df_final['Data Início'], dayfirst=True).dt.strftime('%d/%m/%Y')
                 df_final['Data Fim'] = pd.to_datetime(df_final['Data Fim'], dayfirst=True).dt.strftime('%d/%m/%Y')
+                
                 df_final = df_final.fillna("")
                 conexao.salvar_no_sheets(df_final)
                 st.cache_data.clear()
@@ -143,7 +147,7 @@ def app():
         return
 
     try:
-        # CORREÇÃO PONTO 2: dayfirst=True para ler corretamente DD/MM
+        # PONTO 2: Leitura rigorosa (dayfirst=True)
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Projeto'] = df_agenda['Projeto'].astype(str).str.replace(r'\.0$', '', regex=True)
@@ -156,18 +160,15 @@ def app():
         st.warning("Sem dados válidos.")
         return
 
-    # Ajuste visual para barra cobrir o dia final
-    df_processado['Fim_Visual'] = df_processado['Data Fim'] + timedelta(days=1)
-
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
-    # --- ESTADO ---
+    # --- INICIALIZAÇÃO DO ESTADO ---
     hoje = get_hoje()
     if 'view_mode' not in st.session_state: st.session_state['view_mode'] = '30d'
     if 'zoom_ini' not in st.session_state: st.session_state['zoom_ini'] = hoje
     if 'zoom_fim' not in st.session_state: st.session_state['zoom_fim'] = hoje + timedelta(days=30)
 
-    # --- COMANDOS ---
+    # --- BARRA DE COMANDOS ---
     st.divider()
     c_botoes, c_status = st.columns([2, 1])
     
@@ -196,26 +197,31 @@ def app():
         situacoes = ["Não Iniciada", "Em Andamento", "Concluída"]
         filtro_situacao = st.multiselect("Filtrar Status:", situacoes, default=situacoes, label_visibility="collapsed", placeholder="Filtrar Status...")
 
+    # --- FILTRAGEM ---
     mask = df_processado['Situacao'].isin(filtro_situacao)
     df_filtrado = df_processado.loc[mask]
 
     if not df_filtrado.empty:
+        # Ordenação
         mapa_ordem = {"Em Andamento": 1, "Não Iniciada": 2, "Concluída": 3}
         df_filtrado['Ordem'] = df_filtrado['Situacao'].map(mapa_ordem)
         df_filtrado = df_filtrado.sort_values(by=['Ordem', 'Data Início'])
 
-        # CORREÇÃO PONTO 1: Altura estrita (sem mínimo de 300px)
+        # --- PONTO 1: ALTURA EXATA BASEADA EM QUANTIDADE (Correção) ---
+        # Não usamos mais max(300, ...). 
+        # A altura é: 100px (cabeçalho/margens) + 50px por projeto.
+        # Se tiver 1 projeto: 150px.
         qtd_projetos = len(df_filtrado['Projeto'].unique())
         altura_final = 100 + (qtd_projetos * 50)
 
         fig = px.timeline(
             df_filtrado, 
             x_start="Data Início", 
-            x_end="Fim_Visual", 
+            x_end="Data Fim", 
             y="Projeto",
             text="Projeto",
-            height=altura_final,
-            hover_data={"Projeto": True, "Descrição": True, "Cliente": True, "Executantes": True, "Data Fim": True, "Fim_Visual": False}
+            height=altura_final, # Altura agora é estrita
+            hover_data={"Projeto": True, "Descrição": True, "Cliente": True, "Executantes": True}
         )
 
         fig.update_traces(
@@ -224,11 +230,11 @@ def app():
                 line=dict(color=df_filtrado['CorLine'], width=1),
                 cornerradius=5
             ),
-            # Lógica Visual Aprovada Anteriormente
             textposition='inside', 
             insidetextanchor='start', 
             textfont=dict(color='white', weight='bold', size=13),
-            constraintext='none'
+            constraintext='none', 
+            cliponaxis=False 
         )
 
         fig.update_layout(
@@ -236,10 +242,6 @@ def app():
             plot_bgcolor='rgba(0,0,0,0)',
             font=dict(color="white", family="sans-serif"),
             dragmode="pan", 
-            
-            # Força o texto a aparecer
-            uniformtext_minsize=13,
-            uniformtext_mode='show',
             
             xaxis=dict(
                 title=None,
@@ -271,4 +273,42 @@ def app():
 
         # HOJE
         fig.add_vrect(x0=hoje, x1=hoje + timedelta(days=1), fillcolor="#00FFFF", opacity=0.15, layer="below", line_width=0)
-        fig.add_
+        fig.add_annotation(x=hoje, y=1, yref="paper", text="HOJE", showarrow=False, font=dict(color="#00FFFF", weight="bold"), yshift=10, xshift=20)
+
+        # Fundo Infinito
+        min_dados = df_filtrado['Data Início'].min().date()
+        max_dados = df_filtrado['Data Fim'].max().date()
+        visual_inicio = min(st.session_state['zoom_ini'], min_dados) - timedelta(days=180)
+        visual_fim = max(st.session_state['zoom_fim'], max_dados) + timedelta(days=180)
+        
+        curr_date = visual_inicio 
+        while curr_date <= visual_fim: 
+            if curr_date.weekday() in [5, 6]: 
+                fig.add_vrect(x0=curr_date, x1=curr_date + timedelta(days=1), fillcolor="white", opacity=0.08, layer="below", line_width=0)
+            if curr_date.day == 1:
+                fig.add_vline(x=curr_date, line_width=3, line_color="#FFFFFF", opacity=0.8)
+                fig.add_annotation(x=curr_date, y=0, yref="paper", text=f"{curr_date.strftime('%b').upper()}", showarrow=False, font=dict(color="#FFFFFF", size=14, weight="bold"), yshift=-30)
+            curr_date += timedelta(days=1)
+
+        st.plotly_chart(fig, use_container_width=True)
+        
+        st.divider()
+        st.subheader("Detalhamento")
+        
+        cols_tabela = ["Projeto", "Descrição", "Cliente", "Data Início", "Data Fim", "Executantes"]
+        cols_finais = [c for c in cols_tabela if c in df_filtrado.columns]
+        df_tabela = df_filtrado[cols_finais].copy()
+        
+        df_tabela["Data Início"] = pd.to_datetime(df_tabela["Data Início"]).dt.date
+        df_tabela["Data Fim"] = pd.to_datetime(df_tabela["Data Fim"]).dt.date
+
+        st.dataframe(
+            df_tabela,
+            use_container_width=True, hide_index=True,
+            column_config={
+                "Data Início": st.column_config.DateColumn("Início", format="DD/MM/YYYY"), 
+                "Data Fim": st.column_config.DateColumn("Fim", format="DD/MM/YYYY"),       
+            }
+        )
+    else:
+        st.info("Nenhuma atividade encontrada.")
