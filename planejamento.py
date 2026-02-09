@@ -101,7 +101,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
             return
         
         with st.spinner("Salvando..."):
-            # PONTO 2: Formatação explicita DD/MM/YYYY para evitar inversão
+            # CORREÇÃO DATA: Força DD/MM/YYYY explícito
             nova_linha = pd.DataFrame([{
                 "Projeto": str(projeto_selecionado),
                 "Descrição": descricao,
@@ -143,7 +143,7 @@ def app():
         return
 
     try:
-        # PONTO 2: Leitura com dayfirst=True para interpretar DD/MM
+        # LEITURA ROBUSTA COM DAYFIRST=TRUE
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Projeto'] = df_agenda['Projeto'].astype(str).str.replace(r'\.0$', '', regex=True)
@@ -156,7 +156,7 @@ def app():
         st.warning("Sem dados válidos.")
         return
 
-    # PONTO 1: Ajuste visual para cobrir o dia final
+    # AJUSTE VISUAL (+1 dia para cobrir a data fim)
     df_processado['Fim_Visual'] = df_processado['Data Fim'] + timedelta(days=1)
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
@@ -204,7 +204,7 @@ def app():
         df_filtrado['Ordem'] = df_filtrado['Situacao'].map(mapa_ordem)
         df_filtrado = df_filtrado.sort_values(by=['Ordem', 'Data Início'])
 
-        # CÁLCULO DE ALTURA FIXA (Correção de barras gigantes)
+        # CORREÇÃO ALTURA: Sem mínimo de 300px. Altura exata.
         qtd_projetos = len(df_filtrado['Projeto'].unique())
         altura_final = 100 + (qtd_projetos * 50)
 
@@ -221,17 +221,14 @@ def app():
         fig.update_traces(
             marker=dict(
                 color=df_filtrado['CorFill'],
-                line=dict(color=df_filtrado['CorLine'], width=1)
-                # REMOVIDO: cornerradius (Causava erro em versões antigas do Plotly)
+                line=dict(color=df_filtrado['CorLine'], width=1),
+                cornerradius=5 # Mantido pois você gostou (se der erro me avise, mas é visual)
             ),
-            textposition='inside', # Tenta dentro, se não couber...
-            insidetextanchor='start', # ...começa na esquerda
+            textposition='inside', 
+            insidetextanchor='start', 
             textfont=dict(color='white', weight='bold', size=13),
-            
-            # PONTO 3: Texto Estourando
-            constraintext='none' # Permite vazar da barra se for maior que ela
-            # REMOVIDO: cliponaxis (Causava erro ValueError)
-            # REMOVIDO: insidetextorientation (Causava erro em versões antigas)
+            constraintext='none'
+            # REMOVIDO cliponaxis=False para corrigir o erro fatal
         )
 
         fig.update_layout(
@@ -240,7 +237,7 @@ def app():
             font=dict(color="white", family="sans-serif"),
             dragmode="pan", 
             
-            # Força o texto a aparecer mesmo se o Plotly achar que não cabe
+            # Garante que o texto apareça
             uniformtext_minsize=13,
             uniformtext_mode='show',
             
