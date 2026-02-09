@@ -73,9 +73,9 @@ def modal_detalhes(dados):
     
     c1, c2 = st.columns(2)
     with c1: 
-        st.date_input("Início", value=pd.to_datetime(dados['Data Início'], dayfirst=True), disabled=True)
+        st.text_input("Início", value=dados['Data Início'], disabled=True)
     with c2: 
-        st.date_input("Fim", value=pd.to_datetime(dados['Data Fim'], dayfirst=True), disabled=True)
+        st.text_input("Fim", value=dados['Data Fim'], disabled=True)
         
     st.markdown(f"**Executantes:** {dados['Executantes']}")
     if dados['Veículo']:
@@ -120,7 +120,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
         
         # --- PONTO 1: VALIDAÇÃO DE DATA (Intertravamento) ---
         if data_inicio and data_fim and data_fim < data_inicio:
-            erros.append("Data Fim não pode ser menor que Data Início")
+            erros.append("A Data Fim não pode ser menor que a Data Início!")
 
         if erros:
             st.error(f"Erro: {', '.join(erros)}")
@@ -247,9 +247,8 @@ def app():
             ),
             textposition='inside', 
             insidetextanchor='start',
-            insidetextorientation='horizontal', 
-            textfont=dict(color='#000000', weight='bold', size=13),
-            constraintext='none'
+            textfont=dict(color='#000000', weight='bold', size=13)
+            # REMOVIDO TODO O RESTO QUE CAUSA ERRO
         )
 
         fig.update_layout(
@@ -257,8 +256,11 @@ def app():
             plot_bgcolor='rgba(0,0,0,0)',
             font=dict(color="white", family="sans-serif"),
             dragmode="pan", 
+            
+            # Garante que o texto apareça
             uniformtext_minsize=13,
             uniformtext_mode='show',
+            
             xaxis=dict(
                 title=None,
                 tickformat="%d/%m", 
@@ -304,28 +306,21 @@ def app():
             curr_date += timedelta(days=1)
 
         # --- PONTO 2: GRÁFICO INTERATIVO (CARDS) ---
-        # "on_select" permite capturar o clique na barra
+        # on_select é nativo do Streamlit 1.35+
         event = st.plotly_chart(
             fig, 
             use_container_width=True, 
-            on_select="rerun", # Recarrega ao clicar
+            on_select="rerun", 
             selection_mode="points"
         )
         
-        # Lógica para abrir o card quando clicado
+        # Lógica para abrir o card
         if event and event["selection"]["points"]:
             try:
-                # O Plotly retorna o índice do ponto clicado (correspondente à linha no DF filtrado)
                 point_index = event["selection"]["points"][0]["point_index"]
-                
-                # Pegamos a linha exata do dataframe filtrado
-                # Importante: Como o gráfico foi ordenado, usamos iloc na mesma ordem
                 row_selecionada = df_filtrado.iloc[point_index]
-                
-                # Abre o modal com os dados
                 modal_detalhes(row_selecionada)
-            except Exception as e:
-                # Evita quebrar se o clique for em área vazia ou índice inválido
+            except Exception:
                 pass
         
         st.divider()
