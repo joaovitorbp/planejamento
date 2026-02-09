@@ -5,10 +5,18 @@ import conexao
 from datetime import datetime, timedelta
 import calendar
 from dateutil.relativedelta import relativedelta
+import pytz # Importante para corrigir o dia "Hoje"
+
+# --- CONFIGURAÇÃO DE FUSO HORÁRIO (BRASIL) ---
+FUSO_BR = pytz.timezone('America/Sao_Paulo')
+
+def get_hoje():
+    # Garante que a data seja a do Brasil, não a do servidor (UTC)
+    return datetime.now(FUSO_BR).date()
 
 # --- Função Auxiliar: Datas Padrão (Modal) ---
 def get_proxima_semana():
-    hoje = datetime.now().date()
+    hoje = get_hoje()
     dias_para_segunda = 7 - hoje.weekday()
     proxima_segunda = hoje + timedelta(days=dias_para_segunda)
     proxima_sexta = proxima_segunda + timedelta(days=4)
@@ -16,7 +24,7 @@ def get_proxima_semana():
 
 # --- Função Auxiliar: Situação e Cores ---
 def calcular_situacao_e_cores(row):
-    hoje = datetime.now().date()
+    hoje = get_hoje()
     try:
         inicio = pd.to_datetime(row['Data Início']).date()
         fim = pd.to_datetime(row['Data Fim']).date()
@@ -37,22 +45,6 @@ def calcular_situacao_e_cores(row):
         cor_line = "#78350F"  # Borda Escura
         
     return pd.Series([situacao, cor_fill, cor_line])
-
-# --- Função para atualizar Session State das Datas ---
-def set_datas(tipo):
-    hoje = datetime.now().date()
-    st.session_state['filtro_ini'] = hoje # Padrão inicia hoje
-    
-    if tipo == '30d':
-        st.session_state['filtro_ini'] = hoje
-        st.session_state['filtro_fim'] = hoje + timedelta(days=30)
-    elif tipo == 'mes':
-        st.session_state['filtro_ini'] = hoje.replace(day=1)
-        _, last = calendar.monthrange(hoje.year, hoje.month)
-        st.session_state['filtro_fim'] = hoje.replace(day=last)
-    elif tipo == '3m':
-        st.session_state['filtro_ini'] = hoje
-        st.session_state['filtro_fim'] = hoje + timedelta(days=90)
 
 # --- Modal (Pop-up) ---
 @st.dialog("Agendar Nova Atividade")
@@ -146,12 +138,12 @@ def app():
         st.info("Nenhum agendamento.")
         return
 
-    # --- PONTO 3: TRATAMENTO ROBUSTO DE STRING ---
+    # --- CORREÇÃO 2: Tratamento de String (Mantém XXXX.XXXX) ---
     try:
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
         
-        # Garante string, remove .0 se existir, mas mantém XXXX.XXXX
+        # Converte para string e remove apenas o .0 final se houver (para números inteiros que viraram float)
         df_agenda['Projeto'] = df_agenda['Projeto'].astype(str).str.replace(r'\.0$', '', regex=True)
         
         df_processado = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
@@ -165,38 +157,48 @@ def app():
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
-    # --- INICIALIZAÇÃO FILTROS ---
-    if 'filtro_ini' not in st.session_state:
-        st.session_state['filtro_ini'] = datetime.today().date()
-    if 'filtro_fim' not in st.session_state:
-        st.session_state['filtro_fim'] = datetime.today().date() + timedelta(days=30)
-
-    # --- BARRA DE BOTÕES (ATALHOS) ---
+    # --- BARRA DE VISUALIZAÇÃO ---
     st.divider()
-    c_atalhos, c_vazio = st.columns([2, 2])
-    with c_atalhos:
-        b1, b2, b3 = st.columns(3)
-        if b1.button("30 Dias", use_container_width=True):
-            set_datas('30d')
-            st.rerun()
-        if b2.button("Mês Atual", use_container_width=True):
-            set_datas('mes')
-            st.rerun()
-        if b3.button("3 Meses", use_container_width=True):
-            set_datas('3m')
-            st.rerun()
-
-    # --- PONTO 4: FILTROS VISÍVEIS (Datas e Status na mesma linha) ---
-    c_ini, c_fim, c_status = st.columns([1, 1, 2])
-    with c_ini:
-        inicio = st.date_input("De:", key="filtro_ini", format="DD/MM/YYYY")
-    with c_fim:
-        fim = st.date_input("Até:", key="filtro_fim", format="DD/MM/YYYY")
+    
+    # Layout: Opções de Período (Esquerda) e Status (Direita)
+    c_periodo, c_status = st.columns([2, 1])
+    
+    with c_periodo:
+        # Opções rápidas. Se selecionar "Personalizado", abre os inputs.
+        periodo_opcao = st.radio(
+            "Período de Visualização:",
+            ["30 Dias", "Mês Atual", "3 Meses", "Personalizado"],
+            index=0,
+            horizontal=True
+        )
+    
     with c_status:
         situacoes = ["Não Iniciada", "Em Andamento", "Concluída"]
         filtro_situacao = st.multiselect("Filtrar Status:", situacoes, default=situacoes)
 
-    # Lógica de Intersecção (Zoom inteligente)
+    # --- LÓGICA DE DATAS (CORREÇÃO 1: Usa get_hoje com fuso BR) ---
+    hoje = get_hoje()
+    
+    if periodo_opcao == "30 Dias":
+        inicio = hoje
+        fim = hoje + timedelta(days=30)
+    elif periodo_opcao == "Mês Atual":
+        inicio = hoje.replace(day=1)
+        _, last = calendar.monthrange(hoje.year, hoje.month)
+        fim = hoje.replace(day=last)
+    elif periodo_opcao == "3 Meses":
+        inicio = hoje
+        fim = hoje + timedelta(days=90)
+    else:
+        # --- AQUI: Inputs manuais aparecem só no Personalizado ---
+        c1, c2 = st.columns(2)
+        with c1:
+            inicio = st.date_input("De:", value=hoje, format="DD/MM/YYYY")
+        with c2:
+            max_data = df_processado['Data Fim'].max().date()
+            fim = st.date_input("Até:", value=max(hoje + timedelta(days=30), max_data), format="DD/MM/YYYY")
+
+    # Filtro de Intersecção (Mantendo lógica original)
     mask = (df_processado['Data Início'].dt.date <= fim) & \
            (df_processado['Data Fim'].dt.date >= inicio) & \
            (df_processado['Situacao'].isin(filtro_situacao))
@@ -204,12 +206,9 @@ def app():
     df_filtrado = df_processado.loc[mask]
 
     if not df_filtrado.empty:
-        # --- PONTO 5: ORDENAÇÃO PERSONALIZADA ---
-        # 1. Em Andamento, 2. Não Iniciada, 3. Concluída
+        # Ordenação
         mapa_ordem = {"Em Andamento": 1, "Não Iniciada": 2, "Concluída": 3}
         df_filtrado['Ordem'] = df_filtrado['Situacao'].map(mapa_ordem)
-        
-        # Ordena pela Ordem (Status) e depois pela Data
         df_filtrado = df_filtrado.sort_values(by=['Ordem', 'Data Início'])
         
         qtd_projetos = len(df_filtrado['Projeto'].unique())
@@ -228,6 +227,7 @@ def app():
             }
         )
 
+        # --- CORREÇÃO 3: TEXTO (Visível e sem cortar) ---
         fig.update_traces(
             marker=dict(
                 color=df_filtrado['CorFill'],
@@ -235,9 +235,11 @@ def app():
                 cornerradius=5
             ),
             textposition='inside', 
-            insidetextanchor='start',
+            insidetextanchor='start', # Fixo no início da barra
             textfont=dict(color='white', weight='bold', size=13),
-            constraintext='none'
+            
+            constraintext='none', # Permite que o texto exceda a barra
+            cliponaxis=False      # Permite que o texto desenhe fora da área do eixo
         )
 
         fig.update_layout(
@@ -275,36 +277,33 @@ def app():
             bargap=0.3
         )
 
-        # --- PONTO 2: DESTAQUE DO "HOJE" (BLOCO COMPLETO) ---
+        # --- DESTAQUE HOJE (Com Fuso Correto) ---
         fig.add_vrect(
-            x0=datetime.today(),
-            x1=datetime.today() + timedelta(days=1),
-            fillcolor="#00FFFF", # Ciano Neon
-            opacity=0.15,        # Transparente mas visível
-            layer="below",       # Atrás das barras
+            x0=hoje,
+            x1=hoje + timedelta(days=1),
+            fillcolor="#00FFFF", 
+            opacity=0.15,        
+            layer="below",       
             line_width=0
         )
-        # Linha fina no inicio do dia para precisão
-        fig.add_vline(x=datetime.today(), line_width=1, line_color="#00FFFF", line_dash="solid")
+        fig.add_vline(x=hoje, line_width=1, line_color="#00FFFF", line_dash="solid")
         
-        # Etiqueta
         fig.add_annotation(
-            x=datetime.today(), y=1, 
+            x=hoje, y=1, 
             yref="paper", text="HOJE", 
             showarrow=False, 
             font=dict(color="#00FFFF", weight="bold"),
             yshift=10,
-            xshift=20 # Desloca um pouco para o meio do dia
+            xshift=20 
         )
 
-        # Loop Visual (Margem 6 meses)
+        # Loop Visual (Margem)
         visual_inicio = inicio - timedelta(days=180)
         visual_fim = fim + timedelta(days=180)
         
         curr_date = visual_inicio 
         
         while curr_date <= visual_fim: 
-            # Fim de Semana
             if curr_date.weekday() in [5, 6]: 
                 fig.add_vrect(
                     x0=curr_date, 
@@ -315,7 +314,6 @@ def app():
                     line_width=0
                 )
             
-            # Separador de Mês
             if curr_date.day == 1:
                 fig.add_vline(
                     x=curr_date, 
