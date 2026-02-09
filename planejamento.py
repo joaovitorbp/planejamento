@@ -44,7 +44,28 @@ def calcular_situacao_e_cores(row):
         
     return pd.Series([situacao, cor_fill, cor_line])
 
-# --- Modal (Pop-up) ---
+# --- DIALOG: SELEÇÃO DE DATAS PERSONALIZADAS (PONTO 1) ---
+@st.dialog("Selecionar Período")
+def modal_datas_personalizadas():
+    st.write("Defina o período de visualização do gráfico:")
+    
+    # Recupera valores atuais ou define padrão
+    padrao_ini = st.session_state.get('zoom_ini', get_hoje())
+    padrao_fim = st.session_state.get('zoom_fim', get_hoje() + timedelta(days=30))
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        ini = st.date_input("De", value=padrao_ini, format="DD/MM/YYYY")
+    with c2:
+        fim = st.date_input("Até", value=padrao_fim, format="DD/MM/YYYY")
+        
+    if st.button("Aplicar Filtro", type="primary", use_container_width=True):
+        st.session_state['zoom_ini'] = ini
+        st.session_state['zoom_fim'] = fim
+        st.session_state['view_mode'] = 'custom' # Marca como personalizado
+        st.rerun()
+
+# --- DIALOG: AGENDAMENTO ---
 @st.dialog("Agendar Nova Atividade")
 def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     st.write("Novo Agendamento")
@@ -138,7 +159,13 @@ def app():
     try:
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
+        
+        # --- PONTO 4: CORREÇÃO XXXX.XXXX ---
+        # 1. Força conversão para string pura
+        # 2. Se for float que virou string (ex: "1001.0"), remove o ".0" final
+        # 3. Se for string com ponto no meio (ex: "1001.2002"), ele MANTÉM o ponto.
         df_agenda['Projeto'] = df_agenda['Projeto'].astype(str).str.replace(r'\.0$', '', regex=True)
+        
         df_processado = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
     except Exception as e:
         st.error(f"Erro ao processar dados: {e}")
@@ -150,45 +177,49 @@ def app():
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
+    # --- INICIALIZAÇÃO DO ESTADO ---
+    hoje = get_hoje()
+    if 'view_mode' not in st.session_state: st.session_state['view_mode'] = '30d'
+    if 'zoom_ini' not in st.session_state: st.session_state['zoom_ini'] = hoje
+    if 'zoom_fim' not in st.session_state: st.session_state['zoom_fim'] = hoje + timedelta(days=30)
+
     # --- BARRA DE VISUALIZAÇÃO ---
     st.divider()
-    c_periodo, c_status = st.columns([2, 1])
+    c_botoes, c_status = st.columns([2, 1])
     
-    with c_periodo:
-        periodo_opcao = st.radio(
-            "Período de Visualização (Zoom):", # Alterei o nome para ficar claro
-            ["30 Dias", "Mês Atual", "3 Meses", "Personalizado"],
-            index=0,
-            horizontal=True
-        )
-    
+    with c_botoes:
+        # Botões de atalho
+        b1, b2, b3, b4 = st.columns(4)
+        
+        # Lógica dos botões atualiza o Session State
+        if b1.button("30 Dias", use_container_width=True, type="primary" if st.session_state['view_mode']=='30d' else "secondary"):
+            st.session_state['zoom_ini'] = hoje
+            st.session_state['zoom_fim'] = hoje + timedelta(days=30)
+            st.session_state['view_mode'] = '30d'
+            st.rerun()
+            
+        if b2.button("Mês Atual", use_container_width=True, type="primary" if st.session_state['view_mode']=='mes' else "secondary"):
+            st.session_state['zoom_ini'] = hoje.replace(day=1)
+            _, last = calendar.monthrange(hoje.year, hoje.month)
+            st.session_state['zoom_fim'] = hoje.replace(day=last)
+            st.session_state['view_mode'] = 'mes'
+            st.rerun()
+            
+        if b3.button("3 Meses", use_container_width=True, type="primary" if st.session_state['view_mode']=='3m' else "secondary"):
+            st.session_state['zoom_ini'] = hoje
+            st.session_state['zoom_fim'] = hoje + timedelta(days=90)
+            st.session_state['view_mode'] = '3m'
+            st.rerun()
+            
+        # PONTO 1: Botão Personalizado abre Pop-up
+        if b4.button("Personalizado", use_container_width=True, type="primary" if st.session_state['view_mode']=='custom' else "secondary"):
+            modal_datas_personalizadas()
+
     with c_status:
         situacoes = ["Não Iniciada", "Em Andamento", "Concluída"]
-        filtro_situacao = st.multiselect("Filtrar Status:", situacoes, default=situacoes)
+        filtro_situacao = st.multiselect("Filtrar Status:", situacoes, default=situacoes, label_visibility="collapsed", placeholder="Filtrar Status...")
 
-    # --- CÁLCULO DAS DATAS DE ZOOM (APENAS PARA A CÂMERA DO GRÁFICO) ---
-    hoje = get_hoje()
-    
-    if periodo_opcao == "30 Dias":
-        zoom_inicio = hoje
-        zoom_fim = hoje + timedelta(days=30)
-    elif periodo_opcao == "Mês Atual":
-        zoom_inicio = hoje.replace(day=1)
-        _, last = calendar.monthrange(hoje.year, hoje.month)
-        zoom_fim = hoje.replace(day=last)
-    elif periodo_opcao == "3 Meses":
-        zoom_inicio = hoje
-        zoom_fim = hoje + timedelta(days=90)
-    else:
-        c1, c2 = st.columns(2)
-        with c1:
-            zoom_inicio = st.date_input("De:", value=hoje, format="DD/MM/YYYY")
-        with c2:
-            max_data = df_processado['Data Fim'].max().date()
-            zoom_fim = st.date_input("Até:", value=max(hoje + timedelta(days=30), max_data), format="DD/MM/YYYY")
-
-    # --- MUDANÇA CRÍTICA: FILTRO APENAS POR STATUS ---
-    # Agora trazemos TUDO que tem o status selecionado, independente da data
+    # --- FILTRO DE DADOS (Apenas Status) ---
     mask = df_processado['Situacao'].isin(filtro_situacao)
     df_filtrado = df_processado.loc[mask]
 
@@ -198,8 +229,13 @@ def app():
         df_filtrado['Ordem'] = df_filtrado['Situacao'].map(mapa_ordem)
         df_filtrado = df_filtrado.sort_values(by=['Ordem', 'Data Início'])
         
+        # --- PONTO 3: ALTURA FIXA DAS BARRAS ---
+        # 50px por projeto + 100px de cabeçalho/margem
         qtd_projetos = len(df_filtrado['Projeto'].unique())
-        altura = max(300, qtd_projetos * 50)
+        altura_fixa = 100 + (qtd_projetos * 50) 
+        
+        # Garante mínimo de 300px
+        altura_final = max(300, altura_fixa)
 
         fig = px.timeline(
             df_filtrado, 
@@ -207,7 +243,7 @@ def app():
             x_end="Data Fim", 
             y="Projeto",
             text="Projeto", 
-            height=altura,
+            height=altura_final, # Aplica altura calculada
             hover_data={
                 "Projeto": True, "Descrição": True, "Cliente": True,
                 "Executantes": True, "Situacao": True, "CorFill": False, "CorLine": False, "Ordem": False
@@ -242,9 +278,8 @@ def app():
                 gridcolor='#333333',
                 dtick=86400000.0,    
                 
-                # --- AQUI ESTÁ O "ZOOM" ---
-                # Definimos o range inicial, mas os dados estão lá se arrastar
-                range=[zoom_inicio, zoom_fim], 
+                # Aplica o Zoom baseado nos botões
+                range=[st.session_state['zoom_ini'], st.session_state['zoom_fim']], 
                 
                 ticklabelmode="period", 
                 tickcolor='white',
@@ -263,10 +298,11 @@ def app():
             
             margin=dict(t=50, b=10, l=0, r=0),
             showlegend=False,
-            bargap=0.3
+            # PONTO 3: Espaço entre barras consistente
+            bargap=0.2 
         )
 
-        # Destaque HOJE
+        # --- PONTO 2: HOJE (Apenas Retângulo, sem linha sólida) ---
         fig.add_vrect(
             x0=hoje,
             x1=hoje + timedelta(days=1),
@@ -275,7 +311,6 @@ def app():
             layer="below",       
             line_width=0
         )
-        fig.add_vline(x=hoje, line_width=1, line_color="#00FFFF", line_dash="solid")
         
         fig.add_annotation(
             x=hoje, y=1, 
@@ -286,15 +321,13 @@ def app():
             xshift=20 
         )
 
-        # --- LOOP VISUAL (Background) ---
-        # Agora precisamos garantir que o fundo seja desenhado para TODA a extensão dos dados
-        # e não apenas para o zoom atual, senão ao arrastar, o fundo some.
+        # Loop Visual (Fundo Infinito)
         min_dados = df_filtrado['Data Início'].min().date()
         max_dados = df_filtrado['Data Fim'].max().date()
         
-        # Margem generosa de 6 meses para trás e para frente do TODO
-        visual_inicio = min(zoom_inicio, min_dados) - timedelta(days=180)
-        visual_fim = max(zoom_fim, max_dados) + timedelta(days=180)
+        # Garante que o fundo cubra tanto o zoom quanto todos os dados
+        visual_inicio = min(st.session_state['zoom_ini'], min_dados) - timedelta(days=180)
+        visual_fim = max(st.session_state['zoom_fim'], max_dados) + timedelta(days=180)
         
         curr_date = visual_inicio 
         
