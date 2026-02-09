@@ -42,20 +42,20 @@ def aplicar_estilo():
             background-color: #002B5B;
         }
         
-        /* 4. COMPACTAÇÃO EXTREMA DA TABELA */
-        /* Remove margens extras dos textos dentro das colunas */
+        /* 4. COMPACTAÇÃO DA TABELA */
+        /* Remove margens extras dos textos markdown nas colunas */
         div[data-testid="stMarkdownContainer"] p {
             font-size: 14px;
             margin-bottom: 0px !important;
         }
         
-        /* Linha divisória fina e sem margem */
+        /* Linha divisória fina */
         hr {
-            margin: 2px 0px !important; /* Margem quase zero */
+            margin: 4px 0px !important; 
             border-color: #333;
         }
         
-        /* Ajuste do container da linha para reduzir gap vertical */
+        /* Ajuste do container da coluna para reduzir gap */
         div[data-testid="column"] {
             padding-bottom: 0px !important;
         }
@@ -259,6 +259,8 @@ def app():
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Projeto'] = df_agenda['Projeto'].astype(str).str.replace(r'\.0$', '', regex=True)
+        # Limpeza de dados nulos antes do processamento
+        df_agenda = df_agenda.fillna("")
         df_processado = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
     except Exception as e:
         st.error(f"Erro: {e}")
@@ -383,17 +385,16 @@ def app():
             bargap=0.2 
         )
 
-        # HOJE: COLADO NA BORDA INFERIOR
         fig.add_vrect(x0=hoje, x1=hoje + timedelta(days=1), fillcolor="#00FFFF", opacity=0.15, layer="below", line_width=0)
         fig.add_annotation(
             x=hoje, 
-            y=0, # Base
+            y=0, 
             yref="paper", 
-            yanchor="bottom", # Ancora pela base para colar na linha
+            yanchor="bottom", 
             text="HOJE", 
             showarrow=False, 
             font=dict(color="#00FFFF", weight="bold"), 
-            yshift=0, # Zero deslocamento
+            yshift=0, 
             xshift=20
         )
 
@@ -416,8 +417,7 @@ def app():
         st.divider()
         st.subheader("Detalhamento das Atividades")
         
-        # --- TABELA COMPACTA, ALINHADA E UNIFORME ---
-        # Cabeçalho
+        # --- TABELA CUSTOMIZADA ---
         c_proj, c_desc, c_cli, c_ini, c_fim, c_equipe, c_acao = st.columns([2, 3, 2, 1.2, 1.2, 2, 0.8], vertical_alignment="center")
         c_proj.markdown("**Projeto**")
         c_desc.markdown("**Descrição**")
@@ -431,22 +431,20 @@ def app():
 
         for idx, row in df_filtrado.iterrows():
             with st.container():
-                # vertical_alignment="center" garante que tudo fique centralizado no eixo Y
                 c1, c2, c3, c4, c5, c6, c7 = st.columns([2, 3, 2, 1.2, 1.2, 2, 0.8], vertical_alignment="center")
                 
-                # Texto uniforme: Todos usam st.write para manter a mesma fonte/cor
-                c1.write(f"{row['Projeto']}")
+                c1.markdown(f"{row['Projeto']}")
                 
-                # Truncar descrição apenas visualmente
-                desc_curta = f"{row['Descrição'][:40]}..." if len(row['Descrição']) > 40 else row['Descrição']
-                c2.write(desc_curta, help=row['Descrição']) # help mostra o tooltip nativo se precisar
+                # CORREÇÃO DO ERRO TYPE ERROR: USO DE MARKDOWN COM HELP
+                desc_text = str(row['Descrição'])
+                desc_curta = f"{desc_text[:40]}..." if len(desc_text) > 40 else desc_text
+                c2.markdown(f"<span title='{desc_text}'>{desc_curta}</span>", unsafe_allow_html=True)
                 
-                c3.write(row['Cliente'])
-                c4.write(row['Inicio_Fmt'])
-                c5.write(row['Fim_Fmt'])
-                c6.write(row['Executantes'])
+                c3.markdown(f"{row['Cliente']}")
+                c4.markdown(f"{row['Inicio_Fmt']}")
+                c5.markdown(f"{row['Fim_Fmt']}")
+                c6.markdown(f"{row['Executantes']}")
                 
-                # Ícone "Sem Cor" (Texto Unicode)
                 if c7.button("✎", key=f"btn_edit_{idx}", type="secondary", use_container_width=True):
                     modal_editar_atividade(idx, df_agenda, lista_time_completa)
                 
