@@ -153,20 +153,20 @@ def app():
     if df_processado.empty:
         st.warning("Sem dados válidos.")
         return
-    
+
     # --- PONTO 1: DATA INCLUSIVA ---
     # Soma 1 dia para o visual preencher o último dia corretamente
     df_processado['Fim_Visual'] = df_processado['Data Fim'] + timedelta(days=1)
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
-    # --- ESTADO ---
+    # --- INICIALIZAÇÃO DO ESTADO ---
     hoje = get_hoje()
     if 'view_mode' not in st.session_state: st.session_state['view_mode'] = '30d'
     if 'zoom_ini' not in st.session_state: st.session_state['zoom_ini'] = hoje
     if 'zoom_fim' not in st.session_state: st.session_state['zoom_fim'] = hoje + timedelta(days=30)
 
-    # --- COMANDOS ---
+    # --- BARRA DE COMANDOS ---
     st.divider()
     c_botoes, c_status = st.columns([2, 1])
     
@@ -209,29 +209,30 @@ def app():
         fig = px.timeline(
             df_filtrado, 
             x_start="Data Início", 
-            x_end="Fim_Visual", # Usa a data inclusiva
+            x_end="Fim_Visual", # Usa a data visual (inclusiva)
             y="Projeto",
             text="Projeto",
             height=altura_final,
+            # Tooltip mostra a Data Fim correta (original)
             hover_data={"Projeto": True, "Descrição": True, "Cliente": True, "Executantes": True, "Data Fim": True, "Fim_Visual": False}
         )
 
         fig.update_traces(
             marker=dict(
                 color=df_filtrado['CorFill'],
-                line=dict(color=df_filtrado['CorLine'], width=1)
-                # REMOVIDO: cornerradius (CAUSADOR DO ERRO)
+                line=dict(color=df_filtrado['CorLine'], width=1),
+                cornerradius=5 # MANTIDO
             ),
             # --- PONTO 2: TEXTO TRAVADO ---
             textposition='inside', 
             insidetextanchor='start',
-            insidetextorientation='horizontal', # Nunca gira
+            insidetextorientation='horizontal', # MANTIDO
             
-            # Cor escura para aparecer se vazar no fundo branco
-            textfont=dict(color='#333333', weight='bold', size=13),
+            # Mudei para Preto para ser visível quando vazar
+            textfont=dict(color='#000000', weight='bold', size=13), 
             
-            constraintext='none' # Permite vazar da barra
-            # REMOVIDO: cliponaxis (CAUSADOR DO ERRO)
+            constraintext='none' # Deixa vazar
+            # cliponaxis FOI REMOVIDO POIS CAUSA ERRO
         )
 
         fig.update_layout(
