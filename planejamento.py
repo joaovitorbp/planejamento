@@ -5,7 +5,7 @@ import conexao
 from datetime import datetime, timedelta
 import calendar
 
-# --- Função Auxiliar: Datas Padrão ---
+# --- Função Auxiliar: Datas Padrão (Modal) ---
 def get_proxima_semana():
     hoje = datetime.now().date()
     dias_para_segunda = 7 - hoje.weekday()
@@ -143,21 +143,64 @@ def app():
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
-    # Filtros Manuais
-    padrao_inicio = datetime.today().date()
-    max_data = df_processado['Data Fim'].max().date()
-    padrao_fim = max(padrao_inicio + timedelta(days=30), max_data)
-
+    # --- CONTROLES DE VISUALIZAÇÃO ---
     st.markdown("### Visualização")
-    f1, f2, f3 = st.columns([1, 1, 2])
-    with f1:
-        inicio = st.date_input("De:", value=padrao_inicio, format="DD/MM/YYYY")
-    with f2:
-        fim = st.date_input("Até:", value=padrao_fim, format="DD/MM/YYYY")
-    with f3:
+    
+    # Coluna 1: Período (Largo) | Coluna 2: Status (Estreito)
+    c_periodo, c_status = st.columns([3, 1])
+    
+    with c_periodo:
+        # Opções de Filtro Rápido
+        periodo_selecionado = st.radio(
+            "Período:",
+            ["30 Dias", "Mês Atual", "3 Meses", "6 Meses", "Personalizado"],
+            index=0,
+            horizontal=True,
+            label_visibility="collapsed" # Esconde o rótulo para ficar limpo
+        )
+    
+    with c_status:
         situacoes = ["Não Iniciada", "Em Andamento", "Concluída"]
-        filtro_situacao = st.multiselect("Filtrar Situação:", situacoes, default=situacoes)
+        filtro_situacao = st.multiselect(
+            "Filtrar Situação:", 
+            situacoes, 
+            default=situacoes,
+            label_visibility="collapsed",
+            placeholder="Status..."
+        )
 
+    # --- LÓGICA DE DATAS INTELIGENTE ---
+    hoje = datetime.now().date()
+    
+    if periodo_selecionado == "30 Dias":
+        inicio = hoje
+        fim = hoje + timedelta(days=30)
+    
+    elif periodo_selecionado == "Mês Atual":
+        inicio = hoje.replace(day=1)
+        # Pega o último dia do mês corrente
+        _, last_day = calendar.monthrange(hoje.year, hoje.month)
+        fim = hoje.replace(day=last_day)
+        
+    elif periodo_selecionado == "3 Meses":
+        inicio = hoje
+        fim = hoje + timedelta(days=90)
+        
+    elif periodo_selecionado == "6 Meses":
+        inicio = hoje
+        fim = hoje + timedelta(days=180)
+        
+    else: # Personalizado (Mostra os inputs apenas aqui)
+        c1, c2 = st.columns(2)
+        with c1:
+            inicio = st.date_input("De:", value=hoje, format="DD/MM/YYYY")
+        with c2:
+            # Sugestão inteligente para data fim personalizada
+            max_data = df_processado['Data Fim'].max().date()
+            padrao_fim_custom = max(hoje + timedelta(days=30), max_data)
+            fim = st.date_input("Até:", value=padrao_fim_custom, format="DD/MM/YYYY")
+
+    # Filtra DataFrame
     mask = (df_processado['Data Início'].dt.date >= inicio) & \
            (df_processado['Data Fim'].dt.date <= fim) & \
            (df_processado['Situacao'].isin(filtro_situacao))
@@ -209,7 +252,6 @@ def app():
                 showgrid=True,
                 gridcolor='#333333',
                 dtick=86400000.0,    
-                # O range inicial respeita o filtro, mas o "pan" permite sair dele
                 range=[inicio, fim],
                 ticklabelmode="period", 
                 tickcolor='white',
@@ -247,14 +289,13 @@ def app():
             yshift=10
         )
 
-        # --- SOLUÇÃO: DESENHAR 6 MESES ANTES E DEPOIS DO FILTRO ---
-        # Isso garante que se o usuário arrastar (pan), a formatação já está lá.
+        # Loop Visual (6 meses antes e depois para margem de segurança no Pan)
         visual_inicio = inicio - timedelta(days=180)
         visual_fim = fim + timedelta(days=180)
         
-        curr_date = visual_inicio # Começa bem antes
+        curr_date = visual_inicio 
         
-        while curr_date <= visual_fim: # Termina bem depois
+        while curr_date <= visual_fim: 
             # Fim de Semana
             if curr_date.weekday() in [5, 6]: 
                 fig.add_vrect(
