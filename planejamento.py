@@ -4,17 +4,15 @@ import pandas as pd
 import conexao
 from datetime import datetime, timedelta
 import calendar
-from dateutil.relativedelta import relativedelta
-import pytz # Importante para corrigir o dia "Hoje"
+import pytz 
 
-# --- CONFIGURAÇÃO DE FUSO HORÁRIO (BRASIL) ---
+# --- CONFIGURAÇÃO DE FUSO HORÁRIO ---
 FUSO_BR = pytz.timezone('America/Sao_Paulo')
 
 def get_hoje():
-    # Garante que a data seja a do Brasil, não a do servidor (UTC)
     return datetime.now(FUSO_BR).date()
 
-# --- Função Auxiliar: Datas Padrão (Modal) ---
+# --- Função Auxiliar: Datas Padrão ---
 def get_proxima_semana():
     hoje = get_hoje()
     dias_para_segunda = 7 - hoje.weekday()
@@ -33,16 +31,16 @@ def calcular_situacao_e_cores(row):
     
     if inicio > hoje:
         situacao = "Não Iniciada"
-        cor_fill = "#EF4444"  # Vermelho
-        cor_line = "#7F1D1D"  # Borda Escura
+        cor_fill = "#EF4444"
+        cor_line = "#7F1D1D"
     elif fim < hoje:
         situacao = "Concluída"
-        cor_fill = "#10B981"  # Verde
-        cor_line = "#064E3B"  # Borda Escura
+        cor_fill = "#10B981"
+        cor_line = "#064E3B"
     else:
         situacao = "Em Andamento"
-        cor_fill = "#F59E0B"  # Amarelo
-        cor_line = "#78350F"  # Borda Escura
+        cor_fill = "#F59E0B"
+        cor_line = "#78350F"
         
     return pd.Series([situacao, cor_fill, cor_line])
 
@@ -122,7 +120,6 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
 
 # --- App Principal ---
 def app():
-    # --- HEADER ---
     col_titulo, col_btn = st.columns([4, 1])
     col_titulo.header("📅 Cronograma")
     
@@ -138,14 +135,10 @@ def app():
         st.info("Nenhum agendamento.")
         return
 
-    # --- CORREÇÃO 2: Tratamento de String (Mantém XXXX.XXXX) ---
     try:
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
-        
-        # Converte para string e remove apenas o .0 final se houver (para números inteiros que viraram float)
         df_agenda['Projeto'] = df_agenda['Projeto'].astype(str).str.replace(r'\.0$', '', regex=True)
-        
         df_processado = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
     except Exception as e:
         st.error(f"Erro ao processar dados: {e}")
@@ -159,14 +152,11 @@ def app():
 
     # --- BARRA DE VISUALIZAÇÃO ---
     st.divider()
-    
-    # Layout: Opções de Período (Esquerda) e Status (Direita)
     c_periodo, c_status = st.columns([2, 1])
     
     with c_periodo:
-        # Opções rápidas. Se selecionar "Personalizado", abre os inputs.
         periodo_opcao = st.radio(
-            "Período de Visualização:",
+            "Período de Visualização (Zoom):", # Alterei o nome para ficar claro
             ["30 Dias", "Mês Atual", "3 Meses", "Personalizado"],
             index=0,
             horizontal=True
@@ -176,33 +166,30 @@ def app():
         situacoes = ["Não Iniciada", "Em Andamento", "Concluída"]
         filtro_situacao = st.multiselect("Filtrar Status:", situacoes, default=situacoes)
 
-    # --- LÓGICA DE DATAS (CORREÇÃO 1: Usa get_hoje com fuso BR) ---
+    # --- CÁLCULO DAS DATAS DE ZOOM (APENAS PARA A CÂMERA DO GRÁFICO) ---
     hoje = get_hoje()
     
     if periodo_opcao == "30 Dias":
-        inicio = hoje
-        fim = hoje + timedelta(days=30)
+        zoom_inicio = hoje
+        zoom_fim = hoje + timedelta(days=30)
     elif periodo_opcao == "Mês Atual":
-        inicio = hoje.replace(day=1)
+        zoom_inicio = hoje.replace(day=1)
         _, last = calendar.monthrange(hoje.year, hoje.month)
-        fim = hoje.replace(day=last)
+        zoom_fim = hoje.replace(day=last)
     elif periodo_opcao == "3 Meses":
-        inicio = hoje
-        fim = hoje + timedelta(days=90)
+        zoom_inicio = hoje
+        zoom_fim = hoje + timedelta(days=90)
     else:
-        # --- AQUI: Inputs manuais aparecem só no Personalizado ---
         c1, c2 = st.columns(2)
         with c1:
-            inicio = st.date_input("De:", value=hoje, format="DD/MM/YYYY")
+            zoom_inicio = st.date_input("De:", value=hoje, format="DD/MM/YYYY")
         with c2:
             max_data = df_processado['Data Fim'].max().date()
-            fim = st.date_input("Até:", value=max(hoje + timedelta(days=30), max_data), format="DD/MM/YYYY")
+            zoom_fim = st.date_input("Até:", value=max(hoje + timedelta(days=30), max_data), format="DD/MM/YYYY")
 
-    # Filtro de Intersecção (Mantendo lógica original)
-    mask = (df_processado['Data Início'].dt.date <= fim) & \
-           (df_processado['Data Fim'].dt.date >= inicio) & \
-           (df_processado['Situacao'].isin(filtro_situacao))
-    
+    # --- MUDANÇA CRÍTICA: FILTRO APENAS POR STATUS ---
+    # Agora trazemos TUDO que tem o status selecionado, independente da data
+    mask = df_processado['Situacao'].isin(filtro_situacao)
     df_filtrado = df_processado.loc[mask]
 
     if not df_filtrado.empty:
@@ -227,7 +214,6 @@ def app():
             }
         )
 
-        # --- CORREÇÃO 3: TEXTO (Visível e sem cortar) ---
         fig.update_traces(
             marker=dict(
                 color=df_filtrado['CorFill'],
@@ -235,11 +221,10 @@ def app():
                 cornerradius=5
             ),
             textposition='inside', 
-            insidetextanchor='start', # Fixo no início da barra
+            insidetextanchor='start', 
             textfont=dict(color='white', weight='bold', size=13),
-            
-            constraintext='none', # Permite que o texto exceda a barra
-            cliponaxis=False      # Permite que o texto desenhe fora da área do eixo
+            constraintext='none', 
+            cliponaxis=False 
         )
 
         fig.update_layout(
@@ -256,7 +241,11 @@ def app():
                 showgrid=True,
                 gridcolor='#333333',
                 dtick=86400000.0,    
-                range=[inicio, fim],
+                
+                # --- AQUI ESTÁ O "ZOOM" ---
+                # Definimos o range inicial, mas os dados estão lá se arrastar
+                range=[zoom_inicio, zoom_fim], 
+                
                 ticklabelmode="period", 
                 tickcolor='white',
                 tickfont=dict(color='#cccccc', size=12)
@@ -277,7 +266,7 @@ def app():
             bargap=0.3
         )
 
-        # --- DESTAQUE HOJE (Com Fuso Correto) ---
+        # Destaque HOJE
         fig.add_vrect(
             x0=hoje,
             x1=hoje + timedelta(days=1),
@@ -297,9 +286,15 @@ def app():
             xshift=20 
         )
 
-        # Loop Visual (Margem)
-        visual_inicio = inicio - timedelta(days=180)
-        visual_fim = fim + timedelta(days=180)
+        # --- LOOP VISUAL (Background) ---
+        # Agora precisamos garantir que o fundo seja desenhado para TODA a extensão dos dados
+        # e não apenas para o zoom atual, senão ao arrastar, o fundo some.
+        min_dados = df_filtrado['Data Início'].min().date()
+        max_dados = df_filtrado['Data Fim'].max().date()
+        
+        # Margem generosa de 6 meses para trás e para frente do TODO
+        visual_inicio = min(zoom_inicio, min_dados) - timedelta(days=180)
+        visual_fim = max(zoom_fim, max_dados) + timedelta(days=180)
         
         curr_date = visual_inicio 
         
