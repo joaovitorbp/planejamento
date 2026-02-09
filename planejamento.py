@@ -238,7 +238,7 @@ def app():
             marker=dict(
                 color=df_filtrado['CorFill'],
                 line=dict(color=df_filtrado['CorLine'], width=1),
-                cornerradius=10
+                cornerradius=30
             ),
             textposition='inside', 
             insidetextanchor='start', 
