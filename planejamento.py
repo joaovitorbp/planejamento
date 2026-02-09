@@ -62,6 +62,7 @@ def calcular_situacao_e_cores(row):
     return pd.Series([situacao, cor_fill, cor_line])
 
 # --- DIALOGS ---
+
 @st.dialog("Selecionar Período")
 def modal_datas_personalizadas():
     st.write("Defina o período de visualização:")
@@ -78,9 +79,75 @@ def modal_datas_personalizadas():
         st.session_state['view_mode'] = 'custom'
         st.rerun()
 
-@st.dialog("Agendar Nova Atividade")
+# --- MODAL DE EDIÇÃO (Abre ao clicar na tabela) ---
+@st.dialog("Editar Atividade")
+def modal_editar_atividade(index_original, df_full, lista_time):
+    st.write("Alterar dados da atividade selecionada:")
+    
+    # Recupera os dados atuais baseados no índice original
+    try:
+        dados_atuais = df_full.loc[index_original]
+    except KeyError:
+        st.error("Erro ao localizar atividade. Tente recarregar a página.")
+        return
+
+    st.subheader(f"{dados_atuais['Projeto']}")
+    st.caption(f"Cliente: {dados_atuais['Cliente']}")
+    st.text_input("Descrição", value=dados_atuais['Descrição'], disabled=True)
+
+    # Conversão de datas para o formato datetime (para o componente date_input)
+    try:
+        dt_ini_atual = pd.to_datetime(dados_atuais['Data Início'], dayfirst=True).date()
+        dt_fim_atual = pd.to_datetime(dados_atuais['Data Fim'], dayfirst=True).date()
+    except:
+        dt_ini_atual = get_hoje()
+        dt_fim_atual = get_hoje()
+
+    c1, c2 = st.columns(2)
+    with c1: nova_data_ini = st.date_input("Início", value=dt_ini_atual, format="DD/MM/YYYY")
+    with c2: nova_data_fim = st.date_input("Fim", value=dt_fim_atual, format="DD/MM/YYYY")
+
+    # Tratamento da equipe atual (string -> list)
+    equipe_atual = [x.strip() for x in str(dados_atuais['Executantes']).split(',')] if dados_atuais['Executantes'] else []
+    # Filtra apenas nomes que ainda existem na lista de time, para evitar erro no multiselect
+    equipe_validada = [x for x in equipe_atual if x in lista_time]
+    
+    novos_executantes = st.multiselect("Executantes", options=lista_time, default=equipe_validada)
+
+    if st.button("Salvar Alterações", type="primary"):
+        # Validação de data
+        if nova_data_fim < nova_data_ini:
+            st.error("A data de término não pode ser antes do início.")
+            return
+
+        with st.spinner("Atualizando registro..."):
+            # Atualiza o DataFrame Principal
+            df_full.at[index_original, 'Data Início'] = nova_data_ini.strftime('%d/%m/%Y')
+            df_full.at[index_original, 'Data Fim'] = nova_data_fim.strftime('%d/%m/%Y')
+            df_full.at[index_original, 'Executantes'] = ", ".join(novos_executantes)
+            
+            # Recalcula status (opcional, mas bom pra manter coerência imediata)
+            # O status será recalculado visualmente no app(), mas aqui salvamos no banco
+            # Se quiser mudar o status no banco, teria que recalcular aqui. 
+            # Por enquanto, mantemos "Planejado" ou o que estava, mudando apenas datas.
+
+            # Formatação final para garantir consistência
+            df_full['Data Início'] = pd.to_datetime(df_full['Data Início'], dayfirst=True).dt.strftime('%d/%m/%Y')
+            df_full['Data Fim'] = pd.to_datetime(df_full['Data Fim'], dayfirst=True).dt.strftime('%d/%m/%Y')
+            df_full = df_full.fillna("")
+            
+            # Salva
+            try:
+                conexao.salvar_no_sheets(df_full)
+                st.cache_data.clear()
+                st.success("Alterado com sucesso!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao salvar: {e}")
+
+@st.dialog("Novo Agendamento")
 def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
-    st.write("Novo Agendamento")
+    st.write("Preencha os dados abaixo:")
     lista_projetos = df_obras['Projeto'].astype(str).dropna().unique().tolist() if 'Projeto' in df_obras.columns else []
     lista_time = df_time['Nome'].dropna().unique().tolist() if not df_time.empty and 'Nome' in df_time.columns else []
     col_veic = 'Veículo' if 'Veículo' in df_frota.columns else 'Placa'
@@ -115,9 +182,8 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
         if not data_inicio: erros.append("Data de Início")
         if not data_fim: erros.append("Data de Fim")
         
-        # --- VALIDAÇÃO DE DATA (TEXTO MAIS NATURAL) ---
         if data_inicio and data_fim and data_fim < data_inicio:
-            erros.append("Ops! A data de término não pode ser antes do início.")
+            erros.append("A data de término não pode ser antes do início.")
 
         if erros:
             st.error(f"Atenção: {', '.join(erros)}")
@@ -151,14 +217,17 @@ def app():
     aplicar_estilo() # Aplica o CSS Azul Escuro
     
     col_titulo, col_btn = st.columns([4, 1])
-    col_titulo.header("📅 Cronograma")
+    col_titulo.header("Cronograma") # SEM EMOJI
     
     df_raw, df_frota, df_time, df_obras_raw = conexao.carregar_dados()
     df_agenda = df_raw.copy()
     df_obras = df_obras_raw.copy()
+    
+    # Prepara lista de time para o modal de edição
+    lista_time_completa = df_time['Nome'].dropna().unique().tolist() if not df_time.empty and 'Nome' in df_time.columns else []
 
     with col_btn:
-        if st.button("➕ Novo Agendamento", type="primary", use_container_width=True):
+        if st.button("Novo Agendamento", type="primary", use_container_width=True): # SEM EMOJI
             modal_agendamento(df_obras, df_frota, df_time, df_agenda)
 
     if df_agenda.empty:
@@ -181,7 +250,7 @@ def app():
     # DATA INCLUSIVA
     df_processado['Fim_Visual'] = df_processado['Data Fim'] + timedelta(days=1)
     
-    # Preparando dados formatados para o Hover (Tooltip)
+    # Formatação para o Hover
     df_processado['Inicio_Fmt'] = df_processado['Data Início'].dt.strftime('%d/%m/%Y')
     df_processado['Fim_Fmt'] = df_processado['Data Fim'].dt.strftime('%d/%m/%Y')
 
@@ -220,7 +289,7 @@ def app():
 
     with c_status:
         situacoes = ["Não Iniciada", "Em Andamento", "Concluída"]
-        filtro_situacao = st.multiselect("Filtrar Status:", situacoes, default=situacoes, label_visibility="collapsed", placeholder="Filtrar Status...")
+        filtro_situacao = st.multiselect("Filtrar Status", situacoes, default=situacoes, label_visibility="collapsed", placeholder="Filtrar Status")
 
     mask = df_processado['Situacao'].isin(filtro_situacao)
     df_filtrado = df_processado.loc[mask]
@@ -240,39 +309,37 @@ def app():
             y="Projeto",
             text="Projeto",
             height=altura_final,
-            # HOVER LIMPO: Define exatamente o que aparece e com qual nome
             hover_data={
-                "Projeto": False, # Já está no eixo Y
-                "Fim_Visual": False, # Esconde a data técnica
-                "Data Início": False, # Esconde a data bruta
-                "Data Fim": False, # Esconde a data bruta
-                "Inicio_Fmt": True, # Mostra formatada
-                "Fim_Fmt": True, # Mostra formatada
+                "Projeto": False,
+                "Fim_Visual": False,
+                "Data Início": False,
+                "Data Fim": False,
+                "Inicio_Fmt": True,
+                "Fim_Fmt": True,
                 "Cliente": True,
                 "Descrição": True,
                 "Executantes": True
             }
         )
         
-        # Renomeia os rótulos do Hover para ficar bonito
+        # --- CORREÇÃO DO HOVER: Fundo Escuro, Texto Branco ---
         fig.update_layout(
-            hoverlabel=dict(bgcolor="white", font_size=12, font_family="sans-serif")
+            hoverlabel=dict(bgcolor="#333333", font_size=12, font_family="sans-serif", font_color="white")
         )
         fig.update_traces(
             hovertemplate="<b>%{y}</b><br><br>" +
-                          "📅 Início: %{customdata[0]}<br>" +
-                          "🏁 Término: %{customdata[1]}<br>" +
-                          "👤 Cliente: %{customdata[2]}<br>" +
-                          "📝 Descrição: %{customdata[3]}<br>" +
-                          "👷 Equipe: %{customdata[4]}<extra></extra>",
+                          "Início: %{customdata[0]}<br>" +
+                          "Término: %{customdata[1]}<br>" +
+                          "Cliente: %{customdata[2]}<br>" +
+                          "Descrição: %{customdata[3]}<br>" +
+                          "Equipe: %{customdata[4]}<extra></extra>",
             
-            # Mapeia as colunas do hover_data para o template
             customdata=df_filtrado[['Inicio_Fmt', 'Fim_Fmt', 'Cliente', 'Descrição', 'Executantes']],
             
             marker=dict(
                 color=df_filtrado['CorFill'],
                 line=dict(color=df_filtrado['CorLine'], width=1),
-                cornerradius=10 # SOLICITADO
+                cornerradius=10 
             ),
             textposition='inside', 
             insidetextanchor='start',
@@ -318,7 +385,7 @@ def app():
         fig.add_vrect(x0=hoje, x1=hoje + timedelta(days=1), fillcolor="#00FFFF", opacity=0.15, layer="below", line_width=0)
         fig.add_annotation(x=hoje, y=1, yref="paper", text="HOJE", showarrow=False, font=dict(color="#00FFFF", weight="bold"), yshift=10, xshift=20)
 
-        # Loop Visual
+        # Loop Visual (Fundo Infinito)
         min_dados = df_filtrado['Data Início'].min().date()
         max_dados = df_filtrado['Data Fim'].max().date()
         visual_inicio = min(st.session_state['zoom_ini'], min_dados) - timedelta(days=180)
@@ -336,30 +403,45 @@ def app():
         st.plotly_chart(fig, use_container_width=True)
         
         st.divider()
-        st.subheader("📋 Detalhamento das Atividades")
+        st.subheader("Detalhamento das Atividades")
         
-        # Preparando tabela bonita
+        # --- TABELA INTERATIVA ---
         cols_tabela = ["Projeto", "Descrição", "Cliente", "Data Início", "Data Fim", "Executantes", "Situacao"]
         cols_finais = [c for c in cols_tabela if c in df_filtrado.columns]
         df_tabela = df_filtrado[cols_finais].copy()
         
-        # Converter para date para o column_config funcionar bem
         df_tabela["Data Início"] = pd.to_datetime(df_tabela["Data Início"]).dt.date
         df_tabela["Data Fim"] = pd.to_datetime(df_tabela["Data Fim"]).dt.date
 
-        st.dataframe(
+        # Evento de seleção na tabela
+        event = st.dataframe(
             df_tabela,
             use_container_width=True, 
             hide_index=True,
+            on_select="rerun", # Ativa a interatividade
+            selection_mode="single-row",
             column_config={
-                "Projeto": st.column_config.TextColumn("🏗️ Projeto", width="medium"),
-                "Descrição": st.column_config.TextColumn("📝 Descrição", width="large"),
-                "Cliente": st.column_config.TextColumn("👤 Cliente", width="medium"),
-                "Data Início": st.column_config.DateColumn("📅 Início", format="DD/MM/YYYY"), 
-                "Data Fim": st.column_config.DateColumn("🏁 Término", format="DD/MM/YYYY"),
-                "Executantes": st.column_config.TextColumn("👷 Equipe"),
+                "Projeto": st.column_config.TextColumn("Projeto", width="medium"),
+                "Descrição": st.column_config.TextColumn("Descrição", width="large"),
+                "Cliente": st.column_config.TextColumn("Cliente", width="medium"),
+                "Data Início": st.column_config.DateColumn("Início", format="DD/MM/YYYY"), 
+                "Data Fim": st.column_config.DateColumn("Término", format="DD/MM/YYYY"),
+                "Executantes": st.column_config.TextColumn("Equipe"),
                 "Situacao": st.column_config.TextColumn("Status")
             }
         )
+        
+        # Lógica para abrir modal de edição ao clicar na tabela
+        if event.selection.rows:
+            # Pega o índice numérico da linha clicada na tabela VISÍVEL
+            idx_visual = event.selection.rows[0]
+            # Pega o índice REAL no dataframe filtrado
+            idx_real = df_tabela.index[idx_visual]
+            
+            # Chama o modal passando o índice real para buscar no df_agenda (df_raw)
+            # O df_raw tem os mesmos índices se não resetamos o index no carregamento.
+            # Como df_agenda = df_raw.copy(), e df_processado é apenas um filtro, os índices se mantêm.
+            modal_editar_atividade(idx_real, df_agenda, lista_time_completa)
+
     else:
         st.info("Nenhuma atividade encontrada.")
