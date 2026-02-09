@@ -1,19 +1,18 @@
 import streamlit as st
 import plotly.express as px
-import plotly.graph_objects as go
 import pandas as pd
 import conexao
 from datetime import datetime, timedelta
 import calendar
 import pytz 
 
-# --- FUSO HORÁRIO ---
+# --- CONFIGURAÇÃO DE FUSO HORÁRIO ---
 FUSO_BR = pytz.timezone('America/Sao_Paulo')
 
 def get_hoje():
     return datetime.now(FUSO_BR).date()
 
-# --- FUNÇÕES AUXILIARES ---
+# --- Função Auxiliar: Datas Padrão ---
 def get_proxima_semana():
     hoje = get_hoje()
     dias_para_segunda = 7 - hoje.weekday()
@@ -21,6 +20,7 @@ def get_proxima_semana():
     proxima_sexta = proxima_segunda + timedelta(days=4)
     return proxima_segunda, proxima_sexta
 
+# --- Função Auxiliar: Situação e Cores ---
 def calcular_situacao_e_cores(row):
     hoje = get_hoje()
     try:
@@ -200,30 +200,16 @@ def app():
         df_filtrado['Ordem'] = df_filtrado['Situacao'].map(mapa_ordem)
         df_filtrado = df_filtrado.sort_values(by=['Ordem', 'Data Início'])
 
-        # --- CÁLCULO DA POSIÇÃO DO TEXTO (STICKY LABEL) ---
-        # Converte para datetime para poder comparar
-        zoom_ini_dt = pd.to_datetime(st.session_state['zoom_ini'])
-
-        def calcular_inicio_texto(row):
-            inicio_real = row['Data Início']
-            # Se a obra começa antes do zoom atual, o texto começa no zoom atual (para ficar visível)
-            if inicio_real < zoom_ini_dt:
-                return zoom_ini_dt
-            return inicio_real
-
-        df_filtrado['Posicao_Texto'] = df_filtrado.apply(calcular_inicio_texto, axis=1)
-        
         # Altura Fixa
         qtd_projetos = len(df_filtrado['Projeto'].unique())
         altura_final = max(300, 100 + (qtd_projetos * 50))
 
-        # --- CAMADA 1: BARRAS (SEM TEXTO) ---
         fig = px.timeline(
             df_filtrado, 
             x_start="Data Início", 
             x_end="Data Fim", 
             y="Projeto",
-            # Removemos o text daqui para não cortar
+            text="Projeto",
             height=altura_final,
             hover_data={"Projeto": True, "Descrição": True, "Cliente": True, "Executantes": True}
         )
@@ -233,25 +219,12 @@ def app():
                 color=df_filtrado['CorFill'],
                 line=dict(color=df_filtrado['CorLine'], width=1),
                 cornerradius=5
-            )
-        )
-
-        # --- CAMADA 2: TEXTO FLUTUANTE (PRETO E SOLTO) ---
-        fig.add_trace(
-            go.Scatter(
-                x=df_filtrado['Posicao_Texto'], # Usa a data calculada (Sticky)
-                y=df_filtrado['Projeto'],
-                text=df_filtrado['Projeto'],
-                mode='text',
-                textposition='middle right', # Escreve da esquerda para a direita
-                textfont=dict(
-                    color='#111111', # PRETO (Para aparecer no fundo branco)
-                    size=13, 
-                    weight='bold'
-                ),
-                showlegend=False,
-                hoverinfo='skip'
-            )
+            ),
+            textposition='inside', 
+            insidetextanchor='start', 
+            textfont=dict(color='white', weight='bold', size=13),
+            constraintext='none', 
+            cliponaxis=False 
         )
 
         fig.update_layout(
@@ -267,7 +240,6 @@ def app():
                 showgrid=True,
                 gridcolor='#333333',
                 dtick=86400000.0,    
-                # Zoom inicial (o usuário pode arrastar depois)
                 range=[st.session_state['zoom_ini'], st.session_state['zoom_fim']], 
                 ticklabelmode="period", 
                 tickcolor='white',
@@ -300,7 +272,7 @@ def app():
             yshift=10, xshift=20 
         )
 
-        # Fundo Infinito (Para Pan funcionar bem)
+        # Fundo Infinito
         min_dados = df_filtrado['Data Início'].min().date()
         max_dados = df_filtrado['Data Fim'].max().date()
         visual_inicio = min(st.session_state['zoom_ini'], min_dados) - timedelta(days=180)
@@ -336,4 +308,4 @@ def app():
             }
         )
     else:
-        st.info("Nenhuma atividade encontrada.")
+        st.info("Nenhuma atividade encontrada neste período.")
