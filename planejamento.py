@@ -102,22 +102,26 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
             return
         
         with st.spinner("Salvando..."):
-            # FORMATO BRASILEIRO DD/MM/YYYY
+            # PONTO 2: SALVAR COMO DD/MM/YYYY (String BR)
             nova_linha = pd.DataFrame([{
                 "Projeto": str(projeto_selecionado),
                 "Descrição": descricao,
                 "Cliente": cliente,
-                "Data Início": data_inicio.strftime('%d/%m/%Y'),
-                "Data Fim": data_fim.strftime('%d/%m/%Y'),
+                "Data Início": data_inicio.strftime('%d/%m/%Y'), # Força DD/MM
+                "Data Fim": data_fim.strftime('%d/%m/%Y'),       # Força DD/MM
                 "Executantes": ", ".join(executantes),
                 "Veículo": veiculo if veiculo else "",
                 "Status": "Planejado" 
             }])
+            
             if df_agenda_atual.empty: df_final = nova_linha
             else: df_final = pd.concat([df_agenda_atual, nova_linha], ignore_index=True)
+            
             try:
+                # Garante formatação consistente antes de enviar pro Sheets
                 df_final['Data Início'] = pd.to_datetime(df_final['Data Início'], dayfirst=True).dt.strftime('%d/%m/%Y')
                 df_final['Data Fim'] = pd.to_datetime(df_final['Data Fim'], dayfirst=True).dt.strftime('%d/%m/%Y')
+                
                 df_final = df_final.fillna("")
                 conexao.salvar_no_sheets(df_final)
                 st.cache_data.clear()
@@ -143,7 +147,7 @@ def app():
         return
 
     try:
-        # LEITURA ROBUSTA (dayfirst=True)
+        # PONTO 2: Leitura rigorosa (dayfirst=True)
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Projeto'] = df_agenda['Projeto'].astype(str).str.replace(r'\.0$', '', regex=True)
@@ -155,19 +159,19 @@ def app():
     if df_processado.empty:
         st.warning("Sem dados válidos.")
         return
-
-    # DATA INCLUSIVA (+1 dia para visualização)
+    
+    # --- ALTERAÇÃO AQUI: Data Fim Inclusiva (+1 Dia visual) ---
     df_processado['Fim_Visual'] = df_processado['Data Fim'] + timedelta(days=1)
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
-    # --- ESTADO ---
+    # --- INICIALIZAÇÃO DO ESTADO ---
     hoje = get_hoje()
     if 'view_mode' not in st.session_state: st.session_state['view_mode'] = '30d'
     if 'zoom_ini' not in st.session_state: st.session_state['zoom_ini'] = hoje
     if 'zoom_fim' not in st.session_state: st.session_state['zoom_fim'] = hoje + timedelta(days=30)
 
-    # --- COMANDOS ---
+    # --- BARRA DE COMANDOS ---
     st.divider()
     c_botoes, c_status = st.columns([2, 1])
     
@@ -196,38 +200,45 @@ def app():
         situacoes = ["Não Iniciada", "Em Andamento", "Concluída"]
         filtro_situacao = st.multiselect("Filtrar Status:", situacoes, default=situacoes, label_visibility="collapsed", placeholder="Filtrar Status...")
 
+    # --- FILTRAGEM ---
     mask = df_processado['Situacao'].isin(filtro_situacao)
     df_filtrado = df_processado.loc[mask]
 
     if not df_filtrado.empty:
+        # Ordenação
         mapa_ordem = {"Em Andamento": 1, "Não Iniciada": 2, "Concluída": 3}
         df_filtrado['Ordem'] = df_filtrado['Situacao'].map(mapa_ordem)
         df_filtrado = df_filtrado.sort_values(by=['Ordem', 'Data Início'])
 
+        # --- PONTO 1: ALTURA EXATA BASEADA EM QUANTIDADE (Correção) ---
+        # Não usamos mais max(300, ...). 
+        # A altura é: 100px (cabeçalho/margens) + 50px por projeto.
+        # Se tiver 1 projeto: 150px.
         qtd_projetos = len(df_filtrado['Projeto'].unique())
         altura_final = 100 + (qtd_projetos * 50)
 
         fig = px.timeline(
             df_filtrado, 
             x_start="Data Início", 
-            x_end="Fim_Visual", 
+            x_end="Fim_Visual", # ALTERADO: Usa data inclusiva
             y="Projeto",
             text="Projeto",
-            height=altura_final,
+            height=altura_final, # Altura agora é estrita
+            # Ajusta hover para mostrar Data Fim correta (não a visual)
             hover_data={"Projeto": True, "Descrição": True, "Cliente": True, "Executantes": True, "Data Fim": True, "Fim_Visual": False}
         )
 
         fig.update_traces(
             marker=dict(
                 color=df_filtrado['CorFill'],
-                line=dict(color=df_filtrado['CorLine'], width=1)
-                # REMOVIDO: cornerradius (Incompatível com o servidor)
+                line=dict(color=df_filtrado['CorLine'], width=1),
+                cornerradius=5
             ),
             textposition='inside', 
             insidetextanchor='start', 
             textfont=dict(color='white', weight='bold', size=13),
-            constraintext='none'
-            # REMOVIDO: cliponaxis e insidetextorientation (Incompatíveis)
+            constraintext='none', 
+            # REMOVIDO: cliponaxis=False
         )
 
         fig.update_layout(
@@ -235,10 +246,6 @@ def app():
             plot_bgcolor='rgba(0,0,0,0)',
             font=dict(color="white", family="sans-serif"),
             dragmode="pan", 
-            
-            # TEXTO TRAVADO
-            uniformtext_minsize=13,
-            uniformtext_mode='show',
             
             xaxis=dict(
                 title=None,
