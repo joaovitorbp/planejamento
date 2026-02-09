@@ -6,11 +6,11 @@ from datetime import datetime, timedelta
 import calendar
 import pytz 
 
-# --- CONFIGURAÇÃO DE ESTILO (CSS) ---
+# --- CONFIGURAÇÃO DE ESTILO (CSS SEGURO) ---
 def aplicar_estilo():
     st.markdown("""
         <style>
-        /* 1. Botões Primários (Azul Escuro) */
+        /* 1. Botões Primários (Salvar/Novo) em Azul Escuro */
         div.stButton > button[kind="primary"] {
             background-color: #002B5B !important;
             border-color: #002B5B !important;
@@ -21,23 +21,19 @@ def aplicar_estilo():
             border-color: #004080 !important;
         }
         
-        /* 2. Tags do MultiSelect (Azul Escuro) */
+        /* 2. Tags do MultiSelect em Azul Escuro */
         span[data-baseweb="tag"] {
             background-color: #002B5B !important;
             color: white !important;
         }
-        span[data-baseweb="tag"] span {
-            color: white !important;
-        }
-
-        /* 3. Estilo para os Botões de Edição (Pequenos e Discretos) */
+        
+        /* 3. Botão de Edição (Lápis) - Estilo Discreto */
         div.stButton > button[kind="secondary"] {
             border: 1px solid #444;
-            color: #ccc;
-            height: 35px;
-            width: 35px;
-            padding: 0px;
-            border-radius: 5px;
+            color: #ddd;
+            height: auto;
+            padding-top: 5px;
+            padding-bottom: 5px;
         }
         div.stButton > button[kind="secondary"]:hover {
             border-color: #002B5B;
@@ -45,35 +41,21 @@ def aplicar_estilo():
             background-color: #f0f2f6;
         }
         
-        /* 4. Cabeçalho da Tabela Customizada */
-        .header-col {
-            font-weight: bold;
-            color: #ccc;
-            font-size: 14px;
-            border-bottom: 1px solid #444;
-            padding-bottom: 5px;
-            margin-bottom: 10px;
-        }
-        
-        /* 5. Linha da Tabela */
-        .row-container {
-            padding: 10px 0;
-            border-bottom: 1px solid #333;
-        }
-        .row-text {
-            font-size: 14px;
-            color: #eee;
+        /* 4. Linhas de separação mais sutis */
+        hr {
+            margin-top: 0.5rem;
+            margin-bottom: 0.5rem;
+            border-color: #333;
         }
         </style>
     """, unsafe_allow_html=True)
 
-# --- CONFIGURAÇÃO DE FUSO HORÁRIO ---
+# --- CONFIGURAÇÃO DE FUSO E DATAS ---
 FUSO_BR = pytz.timezone('America/Sao_Paulo')
 
 def get_hoje():
     return datetime.now(FUSO_BR).date()
 
-# --- Função Auxiliar: Datas Padrão ---
 def get_proxima_semana():
     hoje = get_hoje()
     dias_para_segunda = 7 - hoje.weekday()
@@ -81,7 +63,6 @@ def get_proxima_semana():
     proxima_sexta = proxima_segunda + timedelta(days=4)
     return proxima_segunda, proxima_sexta
 
-# --- Função Auxiliar: Situação e Cores ---
 def calcular_situacao_e_cores(row):
     hoje = get_hoje()
     try:
@@ -102,21 +83,18 @@ def calcular_situacao_e_cores(row):
         situacao = "Em Andamento"
         cor_fill = "#F59E0B"
         cor_line = "#78350F"
-        
     return pd.Series([situacao, cor_fill, cor_line])
 
 # --- DIALOGS ---
 
 @st.dialog("Selecionar Período")
 def modal_datas_personalizadas():
-    st.write("Defina o período de visualização:")
+    st.write("Defina o período:")
     padrao_ini = st.session_state.get('zoom_ini', get_hoje())
     padrao_fim = st.session_state.get('zoom_fim', get_hoje() + timedelta(days=30))
-    
     c1, c2 = st.columns(2)
     with c1: ini = st.date_input("De", value=padrao_ini, format="DD/MM/YYYY")
     with c2: fim = st.date_input("Até", value=padrao_fim, format="DD/MM/YYYY")
-        
     if st.button("Aplicar Filtro", type="primary", use_container_width=True):
         st.session_state['zoom_ini'] = ini
         st.session_state['zoom_fim'] = fim
@@ -126,18 +104,18 @@ def modal_datas_personalizadas():
 # --- MODAL DE EDIÇÃO ---
 @st.dialog("Editar Atividade")
 def modal_editar_atividade(index_original, df_full, lista_time):
-    st.write("Alterar dados da atividade selecionada:")
-    
+    st.subheader("Alterar Dados")
     try:
         dados_atuais = df_full.loc[index_original]
     except KeyError:
         st.error("Atividade não encontrada.")
         return
 
-    st.subheader(f"{dados_atuais['Projeto']}")
-    st.caption(f"Cliente: {dados_atuais['Cliente']}")
+    # Info não editável para contexto
+    st.caption(f"Projeto: {dados_atuais['Projeto']} | Cliente: {dados_atuais['Cliente']}")
     st.text_input("Descrição", value=dados_atuais['Descrição'], disabled=True)
 
+    # Datas
     try:
         dt_ini_atual = pd.to_datetime(dados_atuais['Data Início'], dayfirst=True).date()
         dt_fim_atual = pd.to_datetime(dados_atuais['Data Fim'], dayfirst=True).date()
@@ -149,11 +127,12 @@ def modal_editar_atividade(index_original, df_full, lista_time):
     with c1: nova_data_ini = st.date_input("Início", value=dt_ini_atual, format="DD/MM/YYYY")
     with c2: nova_data_fim = st.date_input("Fim", value=dt_fim_atual, format="DD/MM/YYYY")
 
+    # Equipe
     equipe_atual = []
     if isinstance(dados_atuais['Executantes'], str):
         equipe_atual = [x.strip() for x in dados_atuais['Executantes'].split(',')]
-    
     equipe_validada = [x for x in equipe_atual if x in lista_time]
+    
     novos_executantes = st.multiselect("Executantes", options=lista_time, default=equipe_validada)
 
     if st.button("Salvar Alterações", type="primary"):
@@ -161,11 +140,12 @@ def modal_editar_atividade(index_original, df_full, lista_time):
             st.error("A data de término não pode ser antes do início.")
             return
 
-        with st.spinner("Atualizando..."):
+        with st.spinner("Salvando..."):
             df_full.at[index_original, 'Data Início'] = nova_data_ini.strftime('%d/%m/%Y')
             df_full.at[index_original, 'Data Fim'] = nova_data_fim.strftime('%d/%m/%Y')
             df_full.at[index_original, 'Executantes'] = ", ".join(novos_executantes)
             
+            # Re-formata
             df_full['Data Início'] = pd.to_datetime(df_full['Data Início'], dayfirst=True).dt.strftime('%d/%m/%Y')
             df_full['Data Fim'] = pd.to_datetime(df_full['Data Fim'], dayfirst=True).dt.strftime('%d/%m/%Y')
             df_full = df_full.fillna("")
@@ -173,10 +153,10 @@ def modal_editar_atividade(index_original, df_full, lista_time):
             try:
                 conexao.salvar_no_sheets(df_full)
                 st.cache_data.clear()
-                st.success("Salvo com sucesso!")
+                st.success("Salvo!")
                 st.rerun()
             except Exception as e:
-                st.error(f"Erro ao salvar: {e}")
+                st.error(f"Erro: {e}")
 
 @st.dialog("Novo Agendamento")
 def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
@@ -247,10 +227,10 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
 
 # --- APP PRINCIPAL ---
 def app():
-    aplicar_estilo() # Aplica CSS Profissional
+    aplicar_estilo() 
     
     col_titulo, col_btn = st.columns([4, 1])
-    col_titulo.header("Cronograma") 
+    col_titulo.header("Cronograma")
     
     df_raw, df_frota, df_time, df_obras_raw = conexao.carregar_dados()
     df_agenda = df_raw.copy()
@@ -259,7 +239,7 @@ def app():
     lista_time_completa = df_time['Nome'].dropna().unique().tolist() if not df_time.empty and 'Nome' in df_time.columns else []
 
     with col_btn:
-        if st.button("Novo Agendamento", type="primary", use_container_width=True): 
+        if st.button("Novo Agendamento", type="primary", use_container_width=True):
             modal_agendamento(df_obras, df_frota, df_time, df_agenda)
 
     if df_agenda.empty:
@@ -272,7 +252,7 @@ def app():
         df_agenda['Projeto'] = df_agenda['Projeto'].astype(str).str.replace(r'\.0$', '', regex=True)
         df_processado = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
     except Exception as e:
-        st.error(f"Erro ao processar dados: {e}")
+        st.error(f"Erro de processamento: {e}")
         return
 
     if df_processado.empty:
@@ -291,7 +271,7 @@ def app():
     if 'zoom_ini' not in st.session_state: st.session_state['zoom_ini'] = hoje
     if 'zoom_fim' not in st.session_state: st.session_state['zoom_fim'] = hoje + timedelta(days=30)
 
-    # --- FILTROS ---
+    # --- COMANDOS ---
     st.divider()
     c_botoes, c_status = st.columns([2, 1])
     
@@ -338,23 +318,15 @@ def app():
             y="Projeto",
             text="Projeto",
             height=altura_final,
-            hover_data={
-                "Projeto": False,
-                "Fim_Visual": False,
-                "Data Início": False,
-                "Data Fim": False,
-                "Inicio_Fmt": True,
-                "Fim_Fmt": True,
-                "Cliente": True,
-                "Descrição": True,
-                "Executantes": True
-            }
+            # Passando dados customizados para o Hover
+            custom_data=['Inicio_Fmt', 'Fim_Fmt', 'Cliente', 'Descrição', 'Executantes']
         )
         
+        # HOVER: Fundo Escuro (#333) e Texto Branco
         fig.update_layout(
             hoverlabel=dict(
-                bgcolor="#333333", # Fundo Escuro
-                font_color="white", # Letra Branca
+                bgcolor="#333333", 
+                font_color="white", 
                 font_size=12, 
                 font_family="sans-serif",
                 bordercolor="#333333"
@@ -368,13 +340,11 @@ def app():
                           "Cliente: %{customdata[2]}<br>" +
                           "Descrição: %{customdata[3]}<br>" +
                           "Equipe: %{customdata[4]}<extra></extra>",
-            
             customdata=df_filtrado[['Inicio_Fmt', 'Fim_Fmt', 'Cliente', 'Descrição', 'Executantes']],
-            
             marker=dict(
                 color=df_filtrado['CorFill'],
                 line=dict(color=df_filtrado['CorLine'], width=1),
-                cornerradius=10 
+                cornerradius=10
             ),
             textposition='inside', 
             insidetextanchor='start',
@@ -388,7 +358,6 @@ def app():
             plot_bgcolor='rgba(0,0,0,0)',
             font=dict(color="white", family="sans-serif"),
             dragmode="pan", 
-            
             xaxis=dict(
                 title=None,
                 tickformat="%d/%m", 
@@ -401,7 +370,6 @@ def app():
                 tickcolor='white',
                 tickfont=dict(color='#cccccc', size=12)
             ),
-            
             yaxis=dict(
                 title=None,
                 autorange="reversed", 
@@ -411,7 +379,6 @@ def app():
                 type='category',
                 fixedrange=True
             ),
-            
             margin=dict(t=50, b=10, l=0, r=0),
             showlegend=False,
             bargap=0.2 
@@ -420,7 +387,6 @@ def app():
         fig.add_vrect(x0=hoje, x1=hoje + timedelta(days=1), fillcolor="#00FFFF", opacity=0.15, layer="below", line_width=0)
         fig.add_annotation(x=hoje, y=1, yref="paper", text="HOJE", showarrow=False, font=dict(color="#00FFFF", weight="bold"), yshift=10, xshift=20)
 
-        # Fundo Infinito
         min_dados = df_filtrado['Data Início'].min().date()
         max_dados = df_filtrado['Data Fim'].max().date()
         visual_inicio = min(st.session_state['zoom_ini'], min_dados) - timedelta(days=180)
@@ -440,36 +406,38 @@ def app():
         st.divider()
         st.subheader("Detalhamento das Atividades")
         
-        # --- TABELA CUSTOMIZADA COM BOTÕES ---
-        # Substitui st.dataframe por um layout de Grid para ter botões reais
-        
+        # --- TABELA CUSTOMIZADA COM BOTÕES DE EDIÇÃO ---
         # Cabeçalho
-        c_proj, c_desc, c_cli, c_ini, c_fim, c_equipe, c_acao = st.columns([2, 3, 2, 1.2, 1.2, 2, 0.8], vertical_alignment="bottom")
-        c_proj.markdown("<div class='header-col'>Projeto</div>", unsafe_allow_html=True)
-        c_desc.markdown("<div class='header-col'>Descrição</div>", unsafe_allow_html=True)
-        c_cli.markdown("<div class='header-col'>Cliente</div>", unsafe_allow_html=True)
-        c_ini.markdown("<div class='header-col'>Início</div>", unsafe_allow_html=True)
-        c_fim.markdown("<div class='header-col'>Fim</div>", unsafe_allow_html=True)
-        c_equipe.markdown("<div class='header-col'>Equipe</div>", unsafe_allow_html=True)
-        c_acao.markdown("<div class='header-col'>Editar</div>", unsafe_allow_html=True)
+        c_proj, c_desc, c_cli, c_ini, c_fim, c_equipe, c_acao = st.columns([2, 3, 2, 1.2, 1.2, 2, 0.8])
+        c_proj.markdown("**Projeto**")
+        c_desc.markdown("**Descrição**")
+        c_cli.markdown("**Cliente**")
+        c_ini.markdown("**Início**")
+        c_fim.markdown("**Fim**")
+        c_equipe.markdown("**Equipe**")
+        c_acao.markdown("**Editar**")
+        
+        st.markdown("---") # Linha separadora do header
 
-        # Linhas (Iteração)
+        # Linhas de Dados
         for idx, row in df_filtrado.iterrows():
             with st.container():
-                c1, c2, c3, c4, c5, c6, c7 = st.columns([2, 3, 2, 1.2, 1.2, 2, 0.8], vertical_alignment="center")
+                c1, c2, c3, c4, c5, c6, c7 = st.columns([2, 3, 2, 1.2, 1.2, 2, 0.8])
                 
-                c1.markdown(f"<div class='row-text'><b>{row['Projeto']}</b></div>", unsafe_allow_html=True)
-                c2.markdown(f"<div class='row-text' title='{row['Descrição']}'>{row['Descrição'][:40]}{'...' if len(row['Descrição'])>40 else ''}</div>", unsafe_allow_html=True)
-                c3.markdown(f"<div class='row-text'>{row['Cliente']}</div>", unsafe_allow_html=True)
-                c4.markdown(f"<div class='row-text'>{row['Inicio_Fmt']}</div>", unsafe_allow_html=True)
-                c5.markdown(f"<div class='row-text'>{row['Fim_Fmt']}</div>", unsafe_allow_html=True)
-                c6.markdown(f"<div class='row-text'>{row['Executantes']}</div>", unsafe_allow_html=True)
+                # Exibição dos dados
+                c1.write(f"**{row['Projeto']}**")
+                c2.caption(f"{row['Descrição'][:50]}..." if len(row['Descrição']) > 50 else row['Descrição'])
+                c3.write(row['Cliente'])
+                c4.write(row['Inicio_Fmt'])
+                c5.write(row['Fim_Fmt'])
+                c6.write(row['Executantes'])
                 
-                # Botão de Edição (Ícone)
-                if c7.button("✏️", key=f"edit_{idx}", use_container_width=True, type="secondary"):
+                # Botão de Edição com ícone de lápis
+                if c7.button("✏️", key=f"btn_edit_{idx}", type="secondary", use_container_width=True):
+                    # Passa o índice original (idx do DataFrame) para editar a linha certa
                     modal_editar_atividade(idx, df_agenda, lista_time_completa)
                 
-                st.markdown("<div style='border-bottom: 1px solid #333; margin-bottom: 5px;'></div>", unsafe_allow_html=True)
+                st.markdown("---") # Linha separadora entre itens
 
     else:
         st.info("Nenhuma atividade encontrada.")
