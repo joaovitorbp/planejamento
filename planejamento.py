@@ -101,7 +101,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
             return
         
         with st.spinner("Salvando..."):
-            # FORÇA O FORMATO BRASILEIRO NO SALVAMENTO
+            # PONTO 2: Formatação explicita DD/MM/YYYY para evitar inversão
             nova_linha = pd.DataFrame([{
                 "Projeto": str(projeto_selecionado),
                 "Descrição": descricao,
@@ -115,7 +115,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
             if df_agenda_atual.empty: df_final = nova_linha
             else: df_final = pd.concat([df_agenda_atual, nova_linha], ignore_index=True)
             try:
-                # Re-converte tudo para garantir consistência
+                # Re-força string antes de salvar
                 df_final['Data Início'] = pd.to_datetime(df_final['Data Início'], dayfirst=True).dt.strftime('%d/%m/%Y')
                 df_final['Data Fim'] = pd.to_datetime(df_final['Data Fim'], dayfirst=True).dt.strftime('%d/%m/%Y')
                 df_final = df_final.fillna("")
@@ -143,7 +143,7 @@ def app():
         return
 
     try:
-        # LEITURA ROBUSTA COM DAYFIRST=TRUE
+        # PONTO 2: Leitura com dayfirst=True para interpretar DD/MM
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Projeto'] = df_agenda['Projeto'].astype(str).str.replace(r'\.0$', '', regex=True)
@@ -156,7 +156,7 @@ def app():
         st.warning("Sem dados válidos.")
         return
 
-    # DATA INCLUSIVA PARA VISUALIZAÇÃO (+1 dia no visual)
+    # PONTO 1: Ajuste visual para cobrir o dia final
     df_processado['Fim_Visual'] = df_processado['Data Fim'] + timedelta(days=1)
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
@@ -204,7 +204,7 @@ def app():
         df_filtrado['Ordem'] = df_filtrado['Situacao'].map(mapa_ordem)
         df_filtrado = df_filtrado.sort_values(by=['Ordem', 'Data Início'])
 
-        # CÁLCULO DE ALTURA FIXA
+        # CÁLCULO DE ALTURA FIXA (Correção de barras gigantes)
         qtd_projetos = len(df_filtrado['Projeto'].unique())
         altura_final = 100 + (qtd_projetos * 50)
 
@@ -221,18 +221,17 @@ def app():
         fig.update_traces(
             marker=dict(
                 color=df_filtrado['CorFill'],
-                line=dict(color=df_filtrado['CorLine'], width=1),
-                cornerradius=5
+                line=dict(color=df_filtrado['CorLine'], width=1)
+                # REMOVIDO: cornerradius (Causava erro em versões antigas do Plotly)
             ),
-            # LÓGICA DE TEXTO: Começa dentro (esquerda). Se não couber, vaza pra direita.
-            textposition='inside', 
-            insidetextanchor='start',
-            insidetextorientation='horizontal',
+            textposition='inside', # Tenta dentro, se não couber...
+            insidetextanchor='start', # ...começa na esquerda
             textfont=dict(color='white', weight='bold', size=13),
             
-            # Permite estourar a barra sem erro
-            constraintext='none'
-            # REMOVIDO: cliponaxis=False (Causador do Erro)
+            # PONTO 3: Texto Estourando
+            constraintext='none' # Permite vazar da barra se for maior que ela
+            # REMOVIDO: cliponaxis (Causava erro ValueError)
+            # REMOVIDO: insidetextorientation (Causava erro em versões antigas)
         )
 
         fig.update_layout(
