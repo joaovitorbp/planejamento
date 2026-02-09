@@ -112,14 +112,11 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
                 "Veículo": veiculo if veiculo else "",
                 "Status": "Planejado" 
             }])
-            
             if df_agenda_atual.empty: df_final = nova_linha
             else: df_final = pd.concat([df_agenda_atual, nova_linha], ignore_index=True)
-            
             try:
                 df_final['Data Início'] = pd.to_datetime(df_final['Data Início'], dayfirst=True).dt.strftime('%d/%m/%Y')
                 df_final['Data Fim'] = pd.to_datetime(df_final['Data Fim'], dayfirst=True).dt.strftime('%d/%m/%Y')
-                
                 df_final = df_final.fillna("")
                 conexao.salvar_no_sheets(df_final)
                 st.cache_data.clear()
@@ -157,7 +154,7 @@ def app():
         st.warning("Sem dados válidos.")
         return
 
-    # --- ALTERAÇÃO 1: Adiciona 1 dia para preenchimento visual completo (inclusivo) ---
+    # --- PONTO 1: Adiciona 1 dia visualmente para cobrir a data fim (INCLUSIVO) ---
     df_processado['Fim_Visual'] = df_processado['Data Fim'] + timedelta(days=1)
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
@@ -224,14 +221,13 @@ def app():
                 line=dict(color=df_filtrado['CorLine'], width=1),
                 cornerradius=5
             ),
+            # --- PONTO 2: TEXTO TRAVADO ---
             textposition='inside', 
             insidetextanchor='start',
-            
-            # --- ALTERAÇÃO 2: Trava orientação e tamanho ---
             insidetextorientation='horizontal', # Nunca gira
             textfont=dict(color='white', weight='bold', size=13),
-            constraintext='none',
-            cliponaxis=False 
+            constraintext='none' # Deixa vazar se precisar
+            # REMOVIDO: cliponaxis=False (Causava o erro)
         )
 
         fig.update_layout(
@@ -240,7 +236,8 @@ def app():
             font=dict(color="white", family="sans-serif"),
             dragmode="pan", 
             
-            # Força o tamanho do texto a ser respeitado sempre
+            # --- PONTO 2: TAMANHO TRAVADO ---
+            # Força o tamanho 13px mesmo se o gráfico achar pequeno
             uniformtext_minsize=13,
             uniformtext_mode='show',
             
