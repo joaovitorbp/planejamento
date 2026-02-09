@@ -61,6 +61,26 @@ def modal_datas_personalizadas():
         st.session_state['view_mode'] = 'custom'
         st.rerun()
 
+# --- NOVO: Modal de Detalhes (Card ao Clicar) ---
+@st.dialog("Detalhes da Atividade")
+def modal_detalhes(dados):
+    st.subheader(f"{dados['Projeto']}")
+    st.caption(f"Status: {dados['Situacao']}")
+    
+    st.markdown(f"**Cliente:** {dados['Cliente']}")
+    st.markdown(f"**Descrição:**")
+    st.info(dados['Descrição'])
+    
+    c1, c2 = st.columns(2)
+    with c1: 
+        st.date_input("Início", value=pd.to_datetime(dados['Data Início'], dayfirst=True), disabled=True)
+    with c2: 
+        st.date_input("Fim", value=pd.to_datetime(dados['Data Fim'], dayfirst=True), disabled=True)
+        
+    st.markdown(f"**Executantes:** {dados['Executantes']}")
+    if dados['Veículo']:
+        st.markdown(f"**Veículo:** {dados['Veículo']}")
+
 @st.dialog("Agendar Nova Atividade")
 def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     st.write("Novo Agendamento")
@@ -97,31 +117,31 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
         if not executantes: erros.append("Executantes")
         if not data_inicio: erros.append("Data Início")
         if not data_fim: erros.append("Data Fim")
+        
+        # --- PONTO 1: VALIDAÇÃO DE DATA (Intertravamento) ---
+        if data_inicio and data_fim and data_fim < data_inicio:
+            erros.append("Data Fim não pode ser menor que Data Início")
+
         if erros:
-            st.error(f"Campos obrigatórios: {', '.join(erros)}")
+            st.error(f"Erro: {', '.join(erros)}")
             return
         
         with st.spinner("Salvando..."):
-            # PONTO 2: SALVAR COMO DD/MM/YYYY (String BR)
             nova_linha = pd.DataFrame([{
                 "Projeto": str(projeto_selecionado),
                 "Descrição": descricao,
                 "Cliente": cliente,
-                "Data Início": data_inicio.strftime('%d/%m/%Y'), # Força DD/MM
-                "Data Fim": data_fim.strftime('%d/%m/%Y'),       # Força DD/MM
+                "Data Início": data_inicio.strftime('%d/%m/%Y'),
+                "Data Fim": data_fim.strftime('%d/%m/%Y'),
                 "Executantes": ", ".join(executantes),
                 "Veículo": veiculo if veiculo else "",
                 "Status": "Planejado" 
             }])
-            
             if df_agenda_atual.empty: df_final = nova_linha
             else: df_final = pd.concat([df_agenda_atual, nova_linha], ignore_index=True)
-            
             try:
-                # Garante formatação consistente antes de enviar pro Sheets
                 df_final['Data Início'] = pd.to_datetime(df_final['Data Início'], dayfirst=True).dt.strftime('%d/%m/%Y')
                 df_final['Data Fim'] = pd.to_datetime(df_final['Data Fim'], dayfirst=True).dt.strftime('%d/%m/%Y')
-                
                 df_final = df_final.fillna("")
                 conexao.salvar_no_sheets(df_final)
                 st.cache_data.clear()
@@ -147,7 +167,6 @@ def app():
         return
 
     try:
-        # PONTO 2: Leitura rigorosa (dayfirst=True)
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Projeto'] = df_agenda['Projeto'].astype(str).str.replace(r'\.0$', '', regex=True)
@@ -160,19 +179,18 @@ def app():
         st.warning("Sem dados válidos.")
         return
     
-    # --- ALTERAÇÃO SOLICITADA ---
-    # Adiciona 1 dia apenas para visualização no gráfico (Preenchimento inclusivo)
+    # DATA INCLUSIVA
     df_processado['Fim_Visual'] = df_processado['Data Fim'] + timedelta(days=1)
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
-    # --- INICIALIZAÇÃO DO ESTADO ---
+    # --- ESTADO ---
     hoje = get_hoje()
     if 'view_mode' not in st.session_state: st.session_state['view_mode'] = '30d'
     if 'zoom_ini' not in st.session_state: st.session_state['zoom_ini'] = hoje
     if 'zoom_fim' not in st.session_state: st.session_state['zoom_fim'] = hoje + timedelta(days=30)
 
-    # --- BARRA DE COMANDOS ---
+    # --- COMANDOS ---
     st.divider()
     c_botoes, c_status = st.columns([2, 1])
     
@@ -201,45 +219,37 @@ def app():
         situacoes = ["Não Iniciada", "Em Andamento", "Concluída"]
         filtro_situacao = st.multiselect("Filtrar Status:", situacoes, default=situacoes, label_visibility="collapsed", placeholder="Filtrar Status...")
 
-    # --- FILTRAGEM ---
     mask = df_processado['Situacao'].isin(filtro_situacao)
     df_filtrado = df_processado.loc[mask]
 
     if not df_filtrado.empty:
-        # Ordenação
         mapa_ordem = {"Em Andamento": 1, "Não Iniciada": 2, "Concluída": 3}
         df_filtrado['Ordem'] = df_filtrado['Situacao'].map(mapa_ordem)
         df_filtrado = df_filtrado.sort_values(by=['Ordem', 'Data Início'])
 
-        # --- PONTO 1: ALTURA EXATA BASEADA EM QUANTIDADE (Correção) ---
-        # Não usamos mais max(300, ...). 
-        # A altura é: 100px (cabeçalho/margens) + 50px por projeto.
-        # Se tiver 1 projeto: 150px.
         qtd_projetos = len(df_filtrado['Projeto'].unique())
         altura_final = 100 + (qtd_projetos * 50)
 
         fig = px.timeline(
             df_filtrado, 
             x_start="Data Início", 
-            x_end="Fim_Visual", # USA A COLUNA AUXILIAR AQUI
+            x_end="Fim_Visual",
             y="Projeto",
             text="Projeto",
-            height=altura_final, # Altura agora é estrita
-            # Adiciona Data Fim (real) e Fim_Visual (auxiliar) aos dados de hover
+            height=altura_final,
             hover_data={"Projeto": True, "Descrição": True, "Cliente": True, "Executantes": True, "Data Fim": True, "Fim_Visual": False}
         )
 
         fig.update_traces(
             marker=dict(
                 color=df_filtrado['CorFill'],
-                line=dict(color=df_filtrado['CorLine'], width=1),
-                cornerradius=5
+                line=dict(color=df_filtrado['CorLine'], width=1)
             ),
             textposition='inside', 
-            insidetextanchor='start', 
-            textfont=dict(color='white', weight='bold', size=13),
-            constraintext='none', 
-            cliponaxis=False 
+            insidetextanchor='start',
+            insidetextorientation='horizontal', 
+            textfont=dict(color='#000000', weight='bold', size=13),
+            constraintext='none'
         )
 
         fig.update_layout(
@@ -247,7 +257,8 @@ def app():
             plot_bgcolor='rgba(0,0,0,0)',
             font=dict(color="white", family="sans-serif"),
             dragmode="pan", 
-            
+            uniformtext_minsize=13,
+            uniformtext_mode='show',
             xaxis=dict(
                 title=None,
                 tickformat="%d/%m", 
@@ -260,7 +271,6 @@ def app():
                 tickcolor='white',
                 tickfont=dict(color='#cccccc', size=12)
             ),
-            
             yaxis=dict(
                 title=None,
                 autorange="reversed", 
@@ -270,17 +280,15 @@ def app():
                 type='category',
                 fixedrange=True
             ),
-            
             margin=dict(t=50, b=10, l=0, r=0),
             showlegend=False,
             bargap=0.2 
         )
 
-        # HOJE
         fig.add_vrect(x0=hoje, x1=hoje + timedelta(days=1), fillcolor="#00FFFF", opacity=0.15, layer="below", line_width=0)
         fig.add_annotation(x=hoje, y=1, yref="paper", text="HOJE", showarrow=False, font=dict(color="#00FFFF", weight="bold"), yshift=10, xshift=20)
 
-        # Fundo Infinito
+        # Loop Visual
         min_dados = df_filtrado['Data Início'].min().date()
         max_dados = df_filtrado['Data Fim'].max().date()
         visual_inicio = min(st.session_state['zoom_ini'], min_dados) - timedelta(days=180)
@@ -295,7 +303,30 @@ def app():
                 fig.add_annotation(x=curr_date, y=0, yref="paper", text=f"{curr_date.strftime('%b').upper()}", showarrow=False, font=dict(color="#FFFFFF", size=14, weight="bold"), yshift=-30)
             curr_date += timedelta(days=1)
 
-        st.plotly_chart(fig, use_container_width=True)
+        # --- PONTO 2: GRÁFICO INTERATIVO (CARDS) ---
+        # "on_select" permite capturar o clique na barra
+        event = st.plotly_chart(
+            fig, 
+            use_container_width=True, 
+            on_select="rerun", # Recarrega ao clicar
+            selection_mode="points"
+        )
+        
+        # Lógica para abrir o card quando clicado
+        if event and event["selection"]["points"]:
+            try:
+                # O Plotly retorna o índice do ponto clicado (correspondente à linha no DF filtrado)
+                point_index = event["selection"]["points"][0]["point_index"]
+                
+                # Pegamos a linha exata do dataframe filtrado
+                # Importante: Como o gráfico foi ordenado, usamos iloc na mesma ordem
+                row_selecionada = df_filtrado.iloc[point_index]
+                
+                # Abre o modal com os dados
+                modal_detalhes(row_selecionada)
+            except Exception as e:
+                # Evita quebrar se o clique for em área vazia ou índice inválido
+                pass
         
         st.divider()
         st.subheader("Detalhamento")
