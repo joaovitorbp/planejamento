@@ -4,17 +4,16 @@ import pandas as pd
 import conexao
 from datetime import datetime, timedelta
 import calendar
-from dateutil.relativedelta import relativedelta
-import pytz # Biblioteca de Fuso Horário
+import pytz # Para corrigir o fuso horário
 
-# --- CONFIGURAÇÃO DE FUSO HORÁRIO (BRASIL) ---
-# Isso resolve o problema de mostrar dia 09 quando ainda é dia 08
+# --- CONFIGURAÇÃO DE FUSO HORÁRIO (CORREÇÃO DO DIA 'HOJE') ---
 FUSO_BR = pytz.timezone('America/Sao_Paulo')
 
 def get_hoje():
+    # Retorna a data atual correta no Brasil
     return datetime.now(FUSO_BR).date()
 
-# --- Função Auxiliar: Datas Padrão ---
+# --- Função Auxiliar: Datas Padrão (Modal) ---
 def get_proxima_semana():
     hoje = get_hoje()
     dias_para_segunda = 7 - hoje.weekday()
@@ -33,16 +32,16 @@ def calcular_situacao_e_cores(row):
     
     if inicio > hoje:
         situacao = "Não Iniciada"
-        cor_fill = "#EF4444"  # Vermelho
-        cor_line = "#7F1D1D"  # Borda Escura
+        cor_fill = "#EF4444"
+        cor_line = "#7F1D1D"
     elif fim < hoje:
         situacao = "Concluída"
-        cor_fill = "#10B981"  # Verde
-        cor_line = "#064E3B"  # Borda Escura
+        cor_fill = "#10B981"
+        cor_line = "#064E3B"
     else:
         situacao = "Em Andamento"
-        cor_fill = "#F59E0B"  # Amarelo
-        cor_line = "#78350F"  # Borda Escura
+        cor_fill = "#F59E0B"
+        cor_line = "#78350F"
         
     return pd.Series([situacao, cor_fill, cor_line])
 
@@ -141,10 +140,8 @@ def app():
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
         
-        # --- CORREÇÃO PONTO 2: Formatação Robusta do Projeto ---
-        # 1. Converte pra string
-        # 2. Remove .0 final (ex: 1001.0 -> 1001)
-        # 3. Mantém XXXX.XXXX intacto
+        # --- CORREÇÃO TEXTO PROJETO ---
+        # Força texto puro para evitar formatação de número (ex: 1.000)
         df_agenda['Projeto'] = df_agenda['Projeto'].astype(str).str.replace(r'\.0$', '', regex=True)
         
         df_processado = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
@@ -158,22 +155,49 @@ def app():
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
-    # --- DATAS (Brasil) ---
-    hoje = get_hoje() # Usa a função com fuso horário
-    padrao_inicio = hoje
-    max_data = df_processado['Data Fim'].max().date()
-    padrao_fim = max(padrao_inicio + timedelta(days=30), max_data)
+    # --- CONTROLES DE VISUALIZAÇÃO (VOLTARAM!) ---
+    st.divider()
+    
+    # Linha 1: Filtro de Período (Rádio Horizontal) e Filtro de Status
+    c_periodo, c_status = st.columns([2, 1])
+    
+    with c_periodo:
+        periodo_opcao = st.radio(
+            "Período de Visualização:",
+            ["30 Dias", "Mês Atual", "3 Meses", "Personalizado"],
+            index=0,
+            horizontal=True
+        )
 
-    st.markdown("### Visualização")
-    f1, f2, f3 = st.columns([1, 1, 2])
-    with f1:
-        inicio = st.date_input("De:", value=padrao_inicio, format="DD/MM/YYYY")
-    with f2:
-        fim = st.date_input("Até:", value=padrao_fim, format="DD/MM/YYYY")
-    with f3:
+    with c_status:
         situacoes = ["Não Iniciada", "Em Andamento", "Concluída"]
         filtro_situacao = st.multiselect("Filtrar Status:", situacoes, default=situacoes)
 
+    # --- LÓGICA DE DATAS ---
+    hoje = get_hoje() # Data Brasil
+    
+    if periodo_opcao == "30 Dias":
+        inicio = hoje
+        fim = hoje + timedelta(days=30)
+    
+    elif periodo_opcao == "Mês Atual":
+        inicio = hoje.replace(day=1)
+        _, last = calendar.monthrange(hoje.year, hoje.month)
+        fim = hoje.replace(day=last)
+        
+    elif periodo_opcao == "3 Meses":
+        inicio = hoje
+        fim = hoje + timedelta(days=90)
+        
+    else: # Personalizado - AQUI OS CAMPOS APARECEM (Opção Escondida)
+        c1, c2 = st.columns(2)
+        with c1:
+            inicio = st.date_input("De:", value=hoje, format="DD/MM/YYYY")
+        with c2:
+            max_data = df_processado['Data Fim'].max().date()
+            fim = st.date_input("Até:", value=max(hoje + timedelta(days=30), max_data), format="DD/MM/YYYY")
+
+    # Lógica de Intersecção
     mask = (df_processado['Data Início'].dt.date <= fim) & \
            (df_processado['Data Fim'].dt.date >= inicio) & \
            (df_processado['Situacao'].isin(filtro_situacao))
@@ -208,15 +232,12 @@ def app():
                 line=dict(color=df_filtrado['CorLine'], width=1),
                 cornerradius=5
             ),
-            # --- PONTO 4: Texto excedendo a barra ---
+            # --- CONFIGURAÇÃO DE TEXTO ---
             textposition='inside', 
-            insidetextanchor='start',
+            insidetextanchor='start', # Texto sempre no início da barra
             textfont=dict(color='white', weight='bold', size=13),
-            
-            # ISSO AQUI FAZ A MÁGICA:
-            # None = "Não restrinja". Se não couber, ele escreve por cima.
-            constraintext='none',
-            cliponaxis=False # Permite que texto saia da área de plotagem se precisar
+            constraintext='none', # Permite exceder o tamanho da barra
+            cliponaxis=False 
         )
 
         fig.update_layout(
@@ -254,7 +275,7 @@ def app():
             bargap=0.3
         )
 
-        # --- PONTO 1: HOJE CORRIGIDO (Fuso SP) ---
+        # --- DESTAQUE HOJE (Retângulo) ---
         fig.add_vrect(
             x0=hoje,
             x1=hoje + timedelta(days=1),
@@ -263,6 +284,7 @@ def app():
             layer="below",       
             line_width=0
         )
+        # Linha sólida fina para marcar o início exato do dia
         fig.add_vline(x=hoje, line_width=1, line_color="#00FFFF", line_dash="solid")
         
         fig.add_annotation(
@@ -274,7 +296,7 @@ def app():
             xshift=20 
         )
 
-        # Loop Visual
+        # Loop Visual (Margem)
         visual_inicio = inicio - timedelta(days=180)
         visual_fim = fim + timedelta(days=180)
         
