@@ -1,5 +1,6 @@
 import streamlit as st
 import plotly.express as px
+import plotly.graph_objects as go # Necessário para o texto flutuante
 import pandas as pd
 import conexao
 from datetime import datetime, timedelta
@@ -44,32 +45,26 @@ def calcular_situacao_e_cores(row):
         
     return pd.Series([situacao, cor_fill, cor_line])
 
-# --- DIALOG: SELEÇÃO DE DATAS PERSONALIZADAS (PONTO 1) ---
+# --- DIALOGS ---
 @st.dialog("Selecionar Período")
 def modal_datas_personalizadas():
-    st.write("Defina o período de visualização do gráfico:")
-    
-    # Recupera valores atuais ou define padrão
+    st.write("Defina o período de visualização:")
     padrao_ini = st.session_state.get('zoom_ini', get_hoje())
     padrao_fim = st.session_state.get('zoom_fim', get_hoje() + timedelta(days=30))
     
     c1, c2 = st.columns(2)
-    with c1:
-        ini = st.date_input("De", value=padrao_ini, format="DD/MM/YYYY")
-    with c2:
-        fim = st.date_input("Até", value=padrao_fim, format="DD/MM/YYYY")
+    with c1: ini = st.date_input("De", value=padrao_ini, format="DD/MM/YYYY")
+    with c2: fim = st.date_input("Até", value=padrao_fim, format="DD/MM/YYYY")
         
     if st.button("Aplicar Filtro", type="primary", use_container_width=True):
         st.session_state['zoom_ini'] = ini
         st.session_state['zoom_fim'] = fim
-        st.session_state['view_mode'] = 'custom' # Marca como personalizado
+        st.session_state['view_mode'] = 'custom'
         st.rerun()
 
-# --- DIALOG: AGENDAMENTO ---
 @st.dialog("Agendar Nova Atividade")
 def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
     st.write("Novo Agendamento")
-
     lista_projetos = df_obras['Projeto'].astype(str).dropna().unique().tolist() if 'Projeto' in df_obras.columns else []
     lista_time = df_time['Nome'].dropna().unique().tolist() if not df_time.empty and 'Nome' in df_time.columns else []
     col_veic = 'Veículo' if 'Veículo' in df_frota.columns else 'Placa'
@@ -88,14 +83,11 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
 
     descricao = st.text_input("Descrição", value=desc_auto, disabled=True) 
     cliente = st.text_input("Cliente", value=cliente_auto, disabled=True) 
-
     padrao_inicio, padrao_fim = get_proxima_semana()
 
     col1, col2 = st.columns(2)
-    with col1:
-        data_inicio = st.date_input("Início", value=padrao_inicio, format="DD/MM/YYYY")
-    with col2:
-        data_fim = st.date_input("Fim", value=padrao_fim, format="DD/MM/YYYY")
+    with col1: data_inicio = st.date_input("Início", value=padrao_inicio, format="DD/MM/YYYY")
+    with col2: data_fim = st.date_input("Fim", value=padrao_fim, format="DD/MM/YYYY")
 
     executantes = st.multiselect("Executantes", options=lista_time)
     veiculo = st.selectbox("Veículo (Opcional)", options=lista_veiculos, index=None, placeholder="Selecione...")
@@ -106,11 +98,9 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
         if not executantes: erros.append("Executantes")
         if not data_inicio: erros.append("Data Início")
         if not data_fim: erros.append("Data Fim")
-
         if erros:
             st.error(f"Campos obrigatórios: {', '.join(erros)}")
             return
-
         with st.spinner("Salvando..."):
             nova_linha = pd.DataFrame([{
                 "Projeto": str(projeto_selecionado),
@@ -122,12 +112,8 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
                 "Veículo": veiculo if veiculo else "",
                 "Status": "Planejado" 
             }])
-
-            if df_agenda_atual.empty:
-                df_final = nova_linha
-            else:
-                df_final = pd.concat([df_agenda_atual, nova_linha], ignore_index=True)
-
+            if df_agenda_atual.empty: df_final = nova_linha
+            else: df_final = pd.concat([df_agenda_atual, nova_linha], ignore_index=True)
             try:
                 df_final['Data Início'] = pd.to_datetime(df_final['Data Início'], dayfirst=True).dt.strftime('%Y-%m-%d')
                 df_final['Data Fim'] = pd.to_datetime(df_final['Data Fim'], dayfirst=True).dt.strftime('%Y-%m-%d')
@@ -136,8 +122,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
                 st.cache_data.clear()
                 st.success("Salvo!")
                 st.rerun()
-            except Exception as e:
-                st.error(f"Erro: {e}")
+            except Exception as e: st.error(f"Erro: {e}")
 
 # --- App Principal ---
 def app():
@@ -159,13 +144,7 @@ def app():
     try:
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
-        
-        # --- PONTO 4: CORREÇÃO XXXX.XXXX ---
-        # 1. Força conversão para string pura
-        # 2. Se for float que virou string (ex: "1001.0"), remove o ".0" final
-        # 3. Se for string com ponto no meio (ex: "1001.2002"), ele MANTÉM o ponto.
         df_agenda['Projeto'] = df_agenda['Projeto'].astype(str).str.replace(r'\.0$', '', regex=True)
-        
         df_processado = df_agenda.dropna(subset=['Data Início', 'Data Fim'])
     except Exception as e:
         st.error(f"Erro ao processar dados: {e}")
@@ -188,30 +167,23 @@ def app():
     c_botoes, c_status = st.columns([2, 1])
     
     with c_botoes:
-        # Botões de atalho
         b1, b2, b3, b4 = st.columns(4)
-        
-        # Lógica dos botões atualiza o Session State
         if b1.button("30 Dias", use_container_width=True, type="primary" if st.session_state['view_mode']=='30d' else "secondary"):
             st.session_state['zoom_ini'] = hoje
             st.session_state['zoom_fim'] = hoje + timedelta(days=30)
             st.session_state['view_mode'] = '30d'
             st.rerun()
-            
         if b2.button("Mês Atual", use_container_width=True, type="primary" if st.session_state['view_mode']=='mes' else "secondary"):
             st.session_state['zoom_ini'] = hoje.replace(day=1)
             _, last = calendar.monthrange(hoje.year, hoje.month)
             st.session_state['zoom_fim'] = hoje.replace(day=last)
             st.session_state['view_mode'] = 'mes'
             st.rerun()
-            
         if b3.button("3 Meses", use_container_width=True, type="primary" if st.session_state['view_mode']=='3m' else "secondary"):
             st.session_state['zoom_ini'] = hoje
             st.session_state['zoom_fim'] = hoje + timedelta(days=90)
             st.session_state['view_mode'] = '3m'
             st.rerun()
-            
-        # PONTO 1: Botão Personalizado abre Pop-up
         if b4.button("Personalizado", use_container_width=True, type="primary" if st.session_state['view_mode']=='custom' else "secondary"):
             modal_datas_personalizadas()
 
@@ -219,35 +191,40 @@ def app():
         situacoes = ["Não Iniciada", "Em Andamento", "Concluída"]
         filtro_situacao = st.multiselect("Filtrar Status:", situacoes, default=situacoes, label_visibility="collapsed", placeholder="Filtrar Status...")
 
-    # --- FILTRO DE DADOS (Apenas Status) ---
+    # --- FILTRAGEM ---
     mask = df_processado['Situacao'].isin(filtro_situacao)
     df_filtrado = df_processado.loc[mask]
 
     if not df_filtrado.empty:
-        # Ordenação
         mapa_ordem = {"Em Andamento": 1, "Não Iniciada": 2, "Concluída": 3}
         df_filtrado['Ordem'] = df_filtrado['Situacao'].map(mapa_ordem)
         df_filtrado = df_filtrado.sort_values(by=['Ordem', 'Data Início'])
         
-        # --- PONTO 3: ALTURA FIXA DAS BARRAS ---
-        # 50px por projeto + 100px de cabeçalho/margem
-        qtd_projetos = len(df_filtrado['Projeto'].unique())
-        altura_fixa = 100 + (qtd_projetos * 50) 
+        # --- PONTO 2: CÁLCULO INTELIGENTE DA POSIÇÃO DO TEXTO (STICKY LABEL) ---
+        # Converte zoom_ini para timestamp para comparação
+        zoom_start_ts = pd.to_datetime(st.session_state['zoom_ini'])
         
-        # Garante mínimo de 300px
-        altura_final = max(300, altura_fixa)
+        # Função: Se a obra começou antes do zoom atual, o texto deve começar na data do zoom
+        # Se não, começa na data real da obra.
+        def get_text_start(row):
+            real_start = row['Data Início']
+            if real_start < zoom_start_ts:
+                return zoom_start_ts
+            return real_start
 
+        df_filtrado['Data_Texto'] = df_filtrado.apply(get_text_start, axis=1)
+
+        qtd_projetos = len(df_filtrado['Projeto'].unique())
+        altura_final = max(300, 100 + (qtd_projetos * 50))
+
+        # --- CAMADA 1: BARRAS (Sem texto interno) ---
         fig = px.timeline(
             df_filtrado, 
             x_start="Data Início", 
             x_end="Data Fim", 
             y="Projeto",
-            text="Projeto", 
-            height=altura_final, # Aplica altura calculada
-            hover_data={
-                "Projeto": True, "Descrição": True, "Cliente": True,
-                "Executantes": True, "Situacao": True, "CorFill": False, "CorLine": False, "Ordem": False
-            }
+            height=altura_final,
+            hover_data={"Projeto": True, "Descrição": True, "Cliente": True, "Executantes": True}
         )
 
         fig.update_traces(
@@ -255,19 +232,28 @@ def app():
                 color=df_filtrado['CorFill'],
                 line=dict(color=df_filtrado['CorLine'], width=1),
                 cornerradius=5
-            ),
-            textposition='inside', 
-            insidetextanchor='start', 
-            textfont=dict(color='white', weight='bold', size=13),
-            constraintext='none', 
-            cliponaxis=False 
+            )
+        )
+
+        # --- CAMADA 2: TEXTO FLUTUANTE (SCATTER) ---
+        # Isso permite que o texto "vaze" e "siga" a tela
+        fig.add_trace(
+            go.Scatter(
+                x=df_filtrado['Data_Texto'],
+                y=df_filtrado['Projeto'],
+                text=df_filtrado['Projeto'],
+                mode='text',
+                textposition='middle right', # Texto começa no ponto e vai pra direita
+                textfont=dict(color='#222222', size=13, weight='bold'), # Cor escura pra ler em cima de tudo
+                hoverinfo='skip', # Não atrapalhar o hover da barra
+                showlegend=False
+            )
         )
 
         fig.update_layout(
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
             font=dict(color="white", family="sans-serif"),
-            
             dragmode="pan", 
             
             xaxis=dict(
@@ -277,10 +263,7 @@ def app():
                 showgrid=True,
                 gridcolor='#333333',
                 dtick=86400000.0,    
-                
-                # Aplica o Zoom baseado nos botões
                 range=[st.session_state['zoom_ini'], st.session_state['zoom_fim']], 
-                
                 ticklabelmode="period", 
                 tickcolor='white',
                 tickfont=dict(color='#cccccc', size=12)
@@ -298,65 +281,33 @@ def app():
             
             margin=dict(t=50, b=10, l=0, r=0),
             showlegend=False,
-            # PONTO 3: Espaço entre barras consistente
             bargap=0.2 
         )
 
-        # --- PONTO 2: HOJE (Apenas Retângulo, sem linha sólida) ---
+        # HOJE (Retângulo)
         fig.add_vrect(
-            x0=hoje,
-            x1=hoje + timedelta(days=1),
-            fillcolor="#00FFFF", 
-            opacity=0.15,        
-            layer="below",       
-            line_width=0
+            x0=hoje, x1=hoje + timedelta(days=1),
+            fillcolor="#00FFFF", opacity=0.15, layer="below", line_width=0
         )
-        
         fig.add_annotation(
-            x=hoje, y=1, 
-            yref="paper", text="HOJE", 
-            showarrow=False, 
-            font=dict(color="#00FFFF", weight="bold"),
-            yshift=10,
-            xshift=20 
+            x=hoje, y=1, yref="paper", text="HOJE", 
+            showarrow=False, font=dict(color="#00FFFF", weight="bold"),
+            yshift=10, xshift=20 
         )
 
-        # Loop Visual (Fundo Infinito)
+        # Fundo Infinito
         min_dados = df_filtrado['Data Início'].min().date()
         max_dados = df_filtrado['Data Fim'].max().date()
-        
-        # Garante que o fundo cubra tanto o zoom quanto todos os dados
         visual_inicio = min(st.session_state['zoom_ini'], min_dados) - timedelta(days=180)
         visual_fim = max(st.session_state['zoom_fim'], max_dados) + timedelta(days=180)
         
         curr_date = visual_inicio 
-        
         while curr_date <= visual_fim: 
             if curr_date.weekday() in [5, 6]: 
-                fig.add_vrect(
-                    x0=curr_date, 
-                    x1=curr_date + timedelta(days=1), 
-                    fillcolor="white", 
-                    opacity=0.08, 
-                    layer="below", 
-                    line_width=0
-                )
-            
+                fig.add_vrect(x0=curr_date, x1=curr_date + timedelta(days=1), fillcolor="white", opacity=0.08, layer="below", line_width=0)
             if curr_date.day == 1:
-                fig.add_vline(
-                    x=curr_date, 
-                    line_width=3,         
-                    line_color="#FFFFFF", 
-                    opacity=0.8           
-                )
-                fig.add_annotation(
-                    x=curr_date, y=0, yref="paper",
-                    text=f"{curr_date.strftime('%b').upper()}", 
-                    showarrow=False,
-                    font=dict(color="#FFFFFF", size=14, weight="bold"), 
-                    yshift=-30
-                )
-
+                fig.add_vline(x=curr_date, line_width=3, line_color="#FFFFFF", opacity=0.8)
+                fig.add_annotation(x=curr_date, y=0, yref="paper", text=f"{curr_date.strftime('%b').upper()}", showarrow=False, font=dict(color="#FFFFFF", size=14, weight="bold"), yshift=-30)
             curr_date += timedelta(days=1)
 
         st.plotly_chart(fig, use_container_width=True)
@@ -373,8 +324,7 @@ def app():
 
         st.dataframe(
             df_tabela,
-            use_container_width=True, 
-            hide_index=True,
+            use_container_width=True, hide_index=True,
             column_config={
                 "Data Início": st.column_config.DateColumn("Início", format="DD/MM/YYYY"), 
                 "Data Fim": st.column_config.DateColumn("Fim", format="DD/MM/YYYY"),       
