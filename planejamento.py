@@ -102,6 +102,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
             return
         
         with st.spinner("Salvando..."):
+            # FORMATO BRASILEIRO DD/MM/YYYY
             nova_linha = pd.DataFrame([{
                 "Projeto": str(projeto_selecionado),
                 "Descrição": descricao,
@@ -142,6 +143,7 @@ def app():
         return
 
     try:
+        # LEITURA ROBUSTA (dayfirst=True)
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Projeto'] = df_agenda['Projeto'].astype(str).str.replace(r'\.0$', '', regex=True)
@@ -154,21 +156,22 @@ def app():
         st.warning("Sem dados válidos.")
         return
 
-    # --- PONTO 1: Adiciona 1 dia visualmente para cobrir a data fim (INCLUSIVO) ---
+    # DATA INCLUSIVA (+1 dia para visualização)
     df_processado['Fim_Visual'] = df_processado['Data Fim'] + timedelta(days=1)
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
-    # --- INICIALIZAÇÃO FILTROS ---
+    # --- ESTADO ---
     hoje = get_hoje()
     if 'view_mode' not in st.session_state: st.session_state['view_mode'] = '30d'
     if 'zoom_ini' not in st.session_state: st.session_state['zoom_ini'] = hoje
     if 'zoom_fim' not in st.session_state: st.session_state['zoom_fim'] = hoje + timedelta(days=30)
 
-    # --- BARRA DE BOTÕES ---
+    # --- COMANDOS ---
     st.divider()
-    c_atalhos, c_vazio = st.columns([2, 1])
-    with c_atalhos:
+    c_botoes, c_status = st.columns([2, 1])
+    
+    with c_botoes:
         b1, b2, b3, b4 = st.columns(4)
         if b1.button("30 Dias", use_container_width=True, type="primary" if st.session_state['view_mode']=='30d' else "secondary"):
             st.session_state['zoom_ini'] = hoje
@@ -189,7 +192,7 @@ def app():
         if b4.button("Personalizado", use_container_width=True, type="primary" if st.session_state['view_mode']=='custom' else "secondary"):
             modal_datas_personalizadas()
 
-    with c_vazio:
+    with c_status:
         situacoes = ["Não Iniciada", "Em Andamento", "Concluída"]
         filtro_situacao = st.multiselect("Filtrar Status:", situacoes, default=situacoes, label_visibility="collapsed", placeholder="Filtrar Status...")
 
@@ -202,32 +205,29 @@ def app():
         df_filtrado = df_filtrado.sort_values(by=['Ordem', 'Data Início'])
 
         qtd_projetos = len(df_filtrado['Projeto'].unique())
-        altura = 100 + (qtd_projetos * 50) 
+        altura_final = 100 + (qtd_projetos * 50)
 
         fig = px.timeline(
             df_filtrado, 
             x_start="Data Início", 
-            x_end="Fim_Visual", # Usa a data visual (inclusiva)
+            x_end="Fim_Visual", 
             y="Projeto",
-            text="Projeto", 
-            height=altura,
-            # Mostra a data fim real no tooltip, esconde a visual
+            text="Projeto",
+            height=altura_final,
             hover_data={"Projeto": True, "Descrição": True, "Cliente": True, "Executantes": True, "Data Fim": True, "Fim_Visual": False}
         )
 
         fig.update_traces(
             marker=dict(
                 color=df_filtrado['CorFill'],
-                line=dict(color=df_filtrado['CorLine'], width=1),
-                cornerradius=5
+                line=dict(color=df_filtrado['CorLine'], width=1)
+                # REMOVIDO: cornerradius (Incompatível com o servidor)
             ),
-            # --- PONTO 2: TEXTO TRAVADO ---
             textposition='inside', 
-            insidetextanchor='start',
-            insidetextorientation='horizontal', # Nunca gira
+            insidetextanchor='start', 
             textfont=dict(color='white', weight='bold', size=13),
-            constraintext='none' # Deixa vazar se precisar
-            # REMOVIDO: cliponaxis=False (Causava o erro)
+            constraintext='none'
+            # REMOVIDO: cliponaxis e insidetextorientation (Incompatíveis)
         )
 
         fig.update_layout(
@@ -236,8 +236,7 @@ def app():
             font=dict(color="white", family="sans-serif"),
             dragmode="pan", 
             
-            # --- PONTO 2: TAMANHO TRAVADO ---
-            # Força o tamanho 13px mesmo se o gráfico achar pequeno
+            # TEXTO TRAVADO
             uniformtext_minsize=13,
             uniformtext_mode='show',
             
@@ -248,7 +247,7 @@ def app():
                 showgrid=True,
                 gridcolor='#333333',
                 dtick=86400000.0,    
-                range=[st.session_state['zoom_ini'], st.session_state['zoom_fim']],
+                range=[st.session_state['zoom_ini'], st.session_state['zoom_fim']], 
                 ticklabelmode="period", 
                 tickcolor='white',
                 tickfont=dict(color='#cccccc', size=12)
@@ -266,14 +265,14 @@ def app():
             
             margin=dict(t=50, b=10, l=0, r=0),
             showlegend=False,
-            bargap=0.3
+            bargap=0.2 
         )
 
         # HOJE
         fig.add_vrect(x0=hoje, x1=hoje + timedelta(days=1), fillcolor="#00FFFF", opacity=0.15, layer="below", line_width=0)
         fig.add_annotation(x=hoje, y=1, yref="paper", text="HOJE", showarrow=False, font=dict(color="#00FFFF", weight="bold"), yshift=10, xshift=20)
 
-        # Background Infinito
+        # Fundo Infinito
         min_dados = df_filtrado['Data Início'].min().date()
         max_dados = df_filtrado['Data Fim'].max().date()
         visual_inicio = min(st.session_state['zoom_ini'], min_dados) - timedelta(days=180)
@@ -302,12 +301,11 @@ def app():
 
         st.dataframe(
             df_tabela,
-            use_container_width=True, 
-            hide_index=True,
+            use_container_width=True, hide_index=True,
             column_config={
                 "Data Início": st.column_config.DateColumn("Início", format="DD/MM/YYYY"), 
                 "Data Fim": st.column_config.DateColumn("Fim", format="DD/MM/YYYY"),       
             }
         )
     else:
-        st.info("Nenhuma atividade encontrada neste período.")
+        st.info("Nenhuma atividade encontrada.")
