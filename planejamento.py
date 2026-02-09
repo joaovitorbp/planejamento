@@ -209,6 +209,7 @@ def app():
                 showgrid=True,
                 gridcolor='#333333',
                 dtick=86400000.0,    
+                # O range inicial respeita o filtro, mas o "pan" permite sair dele
                 range=[inicio, fim],
                 ticklabelmode="period", 
                 tickcolor='white',
@@ -222,7 +223,7 @@ def app():
                 showticklabels=False, 
                 visible=True,
                 type='category',
-                fixedrange=True # <--- PONTO 1: Trava o movimento vertical
+                fixedrange=True 
             ),
             
             margin=dict(t=60, b=10, l=0, r=0),
@@ -246,9 +247,15 @@ def app():
             yshift=10
         )
 
-        # Loop Visual
-        curr_date = inicio
-        while curr_date <= fim:
+        # --- SOLUÇÃO: DESENHAR 6 MESES ANTES E DEPOIS DO FILTRO ---
+        # Isso garante que se o usuário arrastar (pan), a formatação já está lá.
+        visual_inicio = inicio - timedelta(days=180)
+        visual_fim = fim + timedelta(days=180)
+        
+        curr_date = visual_inicio # Começa bem antes
+        
+        while curr_date <= visual_fim: # Termina bem depois
+            # Fim de Semana
             if curr_date.weekday() in [5, 6]: 
                 fig.add_vrect(
                     x0=curr_date, 
@@ -259,6 +266,7 @@ def app():
                     line_width=0
                 )
             
+            # Separador de Mês
             if curr_date.day == 1:
                 fig.add_vline(
                     x=curr_date, 
@@ -281,7 +289,6 @@ def app():
         st.divider()
         st.subheader("Detalhamento")
         
-        # --- PONTO 2: Removemos a coluna Situacao ---
         cols_tabela = ["Projeto", "Descrição", "Cliente", "Data Início", "Data Fim", "Executantes"]
         cols_finais = [c for c in cols_tabela if c in df_filtrado.columns]
         df_tabela = df_filtrado[cols_finais].copy()
