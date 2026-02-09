@@ -4,6 +4,7 @@ import pandas as pd
 import conexao
 from datetime import datetime, timedelta
 import calendar
+from dateutil.relativedelta import relativedelta
 
 # --- Função Auxiliar: Datas Padrão (Modal) ---
 def get_proxima_semana():
@@ -113,21 +114,23 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
 
 # --- App Principal ---
 def app():
-    col1, col2 = st.columns([3, 1])
-    col1.header("📅 Cronograma")
-
+    # --- HEADER E BOTÃO DE NOVO AGENDAMENTO ---
+    col_titulo, col_btn = st.columns([4, 1])
+    col_titulo.header("📅 Cronograma")
+    
     df_raw, df_frota, df_time, df_obras_raw = conexao.carregar_dados()
     df_agenda = df_raw.copy()
     df_obras = df_obras_raw.copy()
 
-    with col2:
-        if st.button("➕ Agendar", use_container_width=True):
+    with col_btn:
+        if st.button("➕ Novo Agendamento", type="primary", use_container_width=True):
             modal_agendamento(df_obras, df_frota, df_time, df_agenda)
 
     if df_agenda.empty:
         st.info("Nenhum agendamento.")
         return
 
+    # Tratamento de Dados
     try:
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
@@ -143,73 +146,85 @@ def app():
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
-    # --- CONTROLES DE VISUALIZAÇÃO ---
-    st.markdown("### Visualização")
+    # --- INICIALIZA ESTADO DOS FILTROS ---
+    if 'view_mode' not in st.session_state:
+        st.session_state['view_mode'] = '30d' # Padrão
     
-    # Coluna 1: Período (Largo) | Coluna 2: Status (Estreito)
-    c_periodo, c_status = st.columns([3, 1])
-    
-    with c_periodo:
-        # Opções de Filtro Rápido
-        periodo_selecionado = st.radio(
-            "Período:",
-            ["30 Dias", "Mês Atual", "3 Meses", "6 Meses", "Personalizado"],
-            index=0,
-            horizontal=True,
-            label_visibility="collapsed" # Esconde o rótulo para ficar limpo
-        )
-    
-    with c_status:
-        situacoes = ["Não Iniciada", "Em Andamento", "Concluída"]
-        filtro_situacao = st.multiselect(
-            "Filtrar Situação:", 
-            situacoes, 
-            default=situacoes,
-            label_visibility="collapsed",
-            placeholder="Status..."
-        )
-
-    # --- LÓGICA DE DATAS INTELIGENTE ---
     hoje = datetime.now().date()
     
-    if periodo_selecionado == "30 Dias":
-        inicio = hoje
-        fim = hoje + timedelta(days=30)
+    # --- BARRA DE FERRAMENTAS (NOVO LAYOUT) ---
+    st.divider()
+    c_btns, c_space = st.columns([3, 1])
     
-    elif periodo_selecionado == "Mês Atual":
-        inicio = hoje.replace(day=1)
-        # Pega o último dia do mês corrente
-        _, last_day = calendar.monthrange(hoje.year, hoje.month)
-        fim = hoje.replace(day=last_day)
-        
-    elif periodo_selecionado == "3 Meses":
-        inicio = hoje
-        fim = hoje + timedelta(days=90)
-        
-    elif periodo_selecionado == "6 Meses":
-        inicio = hoje
-        fim = hoje + timedelta(days=180)
-        
-    else: # Personalizado (Mostra os inputs apenas aqui)
-        c1, c2 = st.columns(2)
-        with c1:
-            inicio = st.date_input("De:", value=hoje, format="DD/MM/YYYY")
-        with c2:
-            # Sugestão inteligente para data fim personalizada
-            max_data = df_processado['Data Fim'].max().date()
-            padrao_fim_custom = max(hoje + timedelta(days=30), max_data)
-            fim = st.date_input("Até:", value=padrao_fim_custom, format="DD/MM/YYYY")
+    with c_btns:
+        # Botões estilo "Tabs"
+        b1, b2, b3, b4, b5 = st.columns(5)
+        if b1.button("30 Dias", use_container_width=True, type="primary" if st.session_state['view_mode'] == '30d' else "secondary"):
+            st.session_state['view_mode'] = '30d'
+            st.rerun()
+        if b2.button("Mês Atual", use_container_width=True, type="primary" if st.session_state['view_mode'] == 'mes' else "secondary"):
+            st.session_state['view_mode'] = 'mes'
+            st.rerun()
+        if b3.button("3 Meses", use_container_width=True, type="primary" if st.session_state['view_mode'] == '3m' else "secondary"):
+            st.session_state['view_mode'] = '3m'
+            st.rerun()
+        if b4.button("6 Meses", use_container_width=True, type="primary" if st.session_state['view_mode'] == '6m' else "secondary"):
+            st.session_state['view_mode'] = '6m'
+            st.rerun()
+        if b5.button("Todos", use_container_width=True, type="primary" if st.session_state['view_mode'] == 'all' else "secondary"):
+            st.session_state['view_mode'] = 'all'
+            st.rerun()
 
-    # Filtra DataFrame
-    mask = (df_processado['Data Início'].dt.date >= inicio) & \
-           (df_processado['Data Fim'].dt.date <= fim) & \
+    # --- CÁLCULO DAS DATAS (SEM FILTRAR DATAFRAME AINDA) ---
+    if st.session_state['view_mode'] == '30d':
+        inicio_view = hoje
+        fim_view = hoje + timedelta(days=30)
+    elif st.session_state['view_mode'] == 'mes':
+        inicio_view = hoje.replace(day=1)
+        _, last = calendar.monthrange(hoje.year, hoje.month)
+        fim_view = hoje.replace(day=last)
+    elif st.session_state['view_mode'] == '3m':
+        inicio_view = hoje
+        fim_view = hoje + timedelta(days=90)
+    elif st.session_state['view_mode'] == '6m':
+        inicio_view = hoje
+        fim_view = hoje + timedelta(days=180)
+    else: # Todos
+        inicio_view = df_processado['Data Início'].min().date()
+        fim_view = df_processado['Data Fim'].max().date()
+
+    # --- FILTROS AVANÇADOS (EXPANDER) ---
+    with st.expander("⚙️ Filtros Avançados e Datas Personalizadas", expanded=False):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            # Permite sobrescrever o view
+            inicio_manual = st.date_input("De:", value=inicio_view, format="DD/MM/YYYY")
+        with c2:
+            fim_manual = st.date_input("Até:", value=fim_view, format="DD/MM/YYYY")
+        with c3:
+            situacoes = ["Não Iniciada", "Em Andamento", "Concluída"]
+            filtro_situacao = st.multiselect("Status:", situacoes, default=situacoes)
+        
+        # Se o usuário mexer na data manual, usamos ela
+        inicio_view = inicio_manual
+        fim_view = fim_manual
+
+    # --- LÓGICA DE FILTRO (OVERLAP / INTERSECÇÃO) ---
+    # Aqui está o segredo: Não filtramos se start >= inicio. 
+    # Filtramos se o projeto tem QUALQUER intersecção com a janela de visualização.
+    # Lógica: (Inicio_Proj <= Fim_View) E (Fim_Proj >= Inicio_View)
+    
+    mask = (df_processado['Data Início'].dt.date <= fim_view) & \
+           (df_processado['Data Fim'].dt.date >= inicio_view) & \
            (df_processado['Situacao'].isin(filtro_situacao))
     
     df_filtrado = df_processado.loc[mask]
 
     if not df_filtrado.empty:
+        # Ordenação
         df_filtrado = df_filtrado.sort_values(by=['Data Início', 'Projeto'])
         
+        # Altura
         qtd_projetos = len(df_filtrado['Projeto'].unique())
         altura = max(300, qtd_projetos * 50)
 
@@ -252,7 +267,8 @@ def app():
                 showgrid=True,
                 gridcolor='#333333',
                 dtick=86400000.0,    
-                range=[inicio, fim],
+                # Definimos o range inicial, mas o usuário pode dar Pan
+                range=[inicio_view, fim_view],
                 ticklabelmode="period", 
                 tickcolor='white',
                 tickfont=dict(color='#cccccc', size=12)
@@ -265,10 +281,10 @@ def app():
                 showticklabels=False, 
                 visible=True,
                 type='category',
-                fixedrange=True 
+                fixedrange=True # Trava Vertical
             ),
             
-            margin=dict(t=60, b=10, l=0, r=0),
+            margin=dict(t=50, b=10, l=0, r=0),
             showlegend=False,
             bargap=0.3
         )
@@ -277,7 +293,7 @@ def app():
         fig.add_vline(
             x=datetime.today(), 
             line_width=3, 
-            line_color="#00FFFF",
+            line_color="#00FFFF", # Ciano Neon
             line_dash="dot",
             opacity=1
         )
@@ -289,9 +305,9 @@ def app():
             yshift=10
         )
 
-        # Loop Visual (6 meses antes e depois para margem de segurança no Pan)
-        visual_inicio = inicio - timedelta(days=180)
-        visual_fim = fim + timedelta(days=180)
+        # Loop Visual (6 meses antes e depois para garantir Pan fluido)
+        visual_inicio = inicio_view - timedelta(days=180)
+        visual_fim = fim_view + timedelta(days=180)
         
         curr_date = visual_inicio 
         
@@ -347,4 +363,4 @@ def app():
             }
         )
     else:
-        st.info("Nenhuma atividade encontrada com os filtros selecionados.")
+        st.info("Nenhuma atividade encontrada neste período.")
