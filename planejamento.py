@@ -24,8 +24,8 @@ def get_proxima_semana():
 def calcular_situacao_e_cores(row):
     hoje = get_hoje()
     try:
-        inicio = pd.to_datetime(row['Data Início']).date()
-        fim = pd.to_datetime(row['Data Fim']).date()
+        inicio = pd.to_datetime(row['Data Início'], dayfirst=True).date()
+        fim = pd.to_datetime(row['Data Fim'], dayfirst=True).date()
     except:
         return pd.Series(["Erro", "#000", "#000"])
     
@@ -100,22 +100,28 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
         if erros:
             st.error(f"Campos obrigatórios: {', '.join(erros)}")
             return
+        
         with st.spinner("Salvando..."):
+            # PONTO 2: SALVAR COMO DD/MM/YYYY (String BR)
             nova_linha = pd.DataFrame([{
                 "Projeto": str(projeto_selecionado),
                 "Descrição": descricao,
                 "Cliente": cliente,
-                "Data Início": data_inicio.strftime('%Y-%m-%d'),
-                "Data Fim": data_fim.strftime('%Y-%m-%d'),
+                "Data Início": data_inicio.strftime('%d/%m/%Y'), # Força DD/MM
+                "Data Fim": data_fim.strftime('%d/%m/%Y'),       # Força DD/MM
                 "Executantes": ", ".join(executantes),
                 "Veículo": veiculo if veiculo else "",
                 "Status": "Planejado" 
             }])
+            
             if df_agenda_atual.empty: df_final = nova_linha
             else: df_final = pd.concat([df_agenda_atual, nova_linha], ignore_index=True)
+            
             try:
-                df_final['Data Início'] = pd.to_datetime(df_final['Data Início'], dayfirst=True).dt.strftime('%Y-%m-%d')
-                df_final['Data Fim'] = pd.to_datetime(df_final['Data Fim'], dayfirst=True).dt.strftime('%Y-%m-%d')
+                # Garante formatação consistente antes de enviar pro Sheets
+                df_final['Data Início'] = pd.to_datetime(df_final['Data Início'], dayfirst=True).dt.strftime('%d/%m/%Y')
+                df_final['Data Fim'] = pd.to_datetime(df_final['Data Fim'], dayfirst=True).dt.strftime('%d/%m/%Y')
+                
                 df_final = df_final.fillna("")
                 conexao.salvar_no_sheets(df_final)
                 st.cache_data.clear()
@@ -141,6 +147,7 @@ def app():
         return
 
     try:
+        # PONTO 2: Leitura rigorosa (dayfirst=True)
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Projeto'] = df_agenda['Projeto'].astype(str).str.replace(r'\.0$', '', regex=True)
@@ -200,9 +207,12 @@ def app():
         df_filtrado['Ordem'] = df_filtrado['Situacao'].map(mapa_ordem)
         df_filtrado = df_filtrado.sort_values(by=['Ordem', 'Data Início'])
 
-        # Altura Fixa
+        # --- PONTO 1: ALTURA EXATA BASEADA EM QUANTIDADE (Correção) ---
+        # Não usamos mais max(300, ...). 
+        # A altura é: 100px (cabeçalho/margens) + 50px por projeto.
+        # Se tiver 1 projeto: 150px.
         qtd_projetos = len(df_filtrado['Projeto'].unique())
-        altura_final = max(300, 100 + (qtd_projetos * 50))
+        altura_final = 100 + (qtd_projetos * 50)
 
         fig = px.timeline(
             df_filtrado, 
@@ -210,7 +220,7 @@ def app():
             x_end="Data Fim", 
             y="Projeto",
             text="Projeto",
-            height=altura_final,
+            height=altura_final, # Altura agora é estrita
             hover_data={"Projeto": True, "Descrição": True, "Cliente": True, "Executantes": True}
         )
 
@@ -261,16 +271,9 @@ def app():
             bargap=0.2 
         )
 
-        # HOJE (Retângulo Ciano)
-        fig.add_vrect(
-            x0=hoje, x1=hoje + timedelta(days=1),
-            fillcolor="#00FFFF", opacity=0.15, layer="below", line_width=0
-        )
-        fig.add_annotation(
-            x=hoje, y=1, yref="paper", text="HOJE", 
-            showarrow=False, font=dict(color="#00FFFF", weight="bold"),
-            yshift=10, xshift=20 
-        )
+        # HOJE
+        fig.add_vrect(x0=hoje, x1=hoje + timedelta(days=1), fillcolor="#00FFFF", opacity=0.15, layer="below", line_width=0)
+        fig.add_annotation(x=hoje, y=1, yref="paper", text="HOJE", showarrow=False, font=dict(color="#00FFFF", weight="bold"), yshift=10, xshift=20)
 
         # Fundo Infinito
         min_dados = df_filtrado['Data Início'].min().date()
@@ -308,4 +311,4 @@ def app():
             }
         )
     else:
-        st.info("Nenhuma atividade encontrada neste período.")
+        st.info("Nenhuma atividade encontrada.")
