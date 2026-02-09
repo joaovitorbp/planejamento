@@ -99,7 +99,9 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
         if erros:
             st.error(f"Campos obrigatórios: {', '.join(erros)}")
             return
+        
         with st.spinner("Salvando..."):
+            # FORÇA O FORMATO BRASILEIRO NO SALVAMENTO
             nova_linha = pd.DataFrame([{
                 "Projeto": str(projeto_selecionado),
                 "Descrição": descricao,
@@ -113,6 +115,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
             if df_agenda_atual.empty: df_final = nova_linha
             else: df_final = pd.concat([df_agenda_atual, nova_linha], ignore_index=True)
             try:
+                # Re-converte tudo para garantir consistência
                 df_final['Data Início'] = pd.to_datetime(df_final['Data Início'], dayfirst=True).dt.strftime('%d/%m/%Y')
                 df_final['Data Fim'] = pd.to_datetime(df_final['Data Fim'], dayfirst=True).dt.strftime('%d/%m/%Y')
                 df_final = df_final.fillna("")
@@ -140,6 +143,7 @@ def app():
         return
 
     try:
+        # LEITURA ROBUSTA COM DAYFIRST=TRUE
         df_agenda['Data Início'] = pd.to_datetime(df_agenda['Data Início'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Data Fim'] = pd.to_datetime(df_agenda['Data Fim'], format='mixed', dayfirst=True, errors='coerce')
         df_agenda['Projeto'] = df_agenda['Projeto'].astype(str).str.replace(r'\.0$', '', regex=True)
@@ -152,8 +156,7 @@ def app():
         st.warning("Sem dados válidos.")
         return
 
-    # --- PONTO 1: AJUSTE DE DATA INCLUSIVA ---
-    # Adicionamos 1 dia APENAS para o gráfico desenhar até o final do dia
+    # DATA INCLUSIVA PARA VISUALIZAÇÃO (+1 dia no visual)
     df_processado['Fim_Visual'] = df_processado['Data Fim'] + timedelta(days=1)
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
@@ -164,7 +167,7 @@ def app():
     if 'zoom_ini' not in st.session_state: st.session_state['zoom_ini'] = hoje
     if 'zoom_fim' not in st.session_state: st.session_state['zoom_fim'] = hoje + timedelta(days=30)
 
-    # --- BARRA DE COMANDOS ---
+    # --- COMANDOS ---
     st.divider()
     c_botoes, c_status = st.columns([2, 1])
     
@@ -201,19 +204,17 @@ def app():
         df_filtrado['Ordem'] = df_filtrado['Situacao'].map(mapa_ordem)
         df_filtrado = df_filtrado.sort_values(by=['Ordem', 'Data Início'])
 
-        # Altura Fixa
+        # CÁLCULO DE ALTURA FIXA
         qtd_projetos = len(df_filtrado['Projeto'].unique())
         altura_final = 100 + (qtd_projetos * 50)
 
         fig = px.timeline(
             df_filtrado, 
             x_start="Data Início", 
-            # PONTO 1: Usamos a data ajustada (+1 dia) para desenhar
             x_end="Fim_Visual", 
             y="Projeto",
             text="Projeto",
             height=altura_final,
-            # Mostramos a Data Fim original no tooltip
             hover_data={"Projeto": True, "Descrição": True, "Cliente": True, "Executantes": True, "Data Fim": True, "Fim_Visual": False}
         )
 
@@ -223,19 +224,15 @@ def app():
                 line=dict(color=df_filtrado['CorLine'], width=1),
                 cornerradius=5
             ),
-            # --- PONTO 2 e 3: POSIÇÃO E FORMATAÇÃO ---
-            # 'auto': Dentro se couber, Fora (direita) se não couber.
-            textposition='auto',
-             
-            # Garante que começa na esquerda se estiver dentro
-            insidetextanchor='start', 
-            
-            # PONTO 3: Nunca gira e nunca muda o tamanho
+            # LÓGICA DE TEXTO: Começa dentro (esquerda). Se não couber, vaza pra direita.
+            textposition='inside', 
+            insidetextanchor='start',
             insidetextorientation='horizontal',
             textfont=dict(color='white', weight='bold', size=13),
             
-            constraintext='none', 
-            cliponaxis=False 
+            # Permite estourar a barra sem erro
+            constraintext='none'
+            # REMOVIDO: cliponaxis=False (Causador do Erro)
         )
 
         fig.update_layout(
@@ -244,7 +241,7 @@ def app():
             font=dict(color="white", family="sans-serif"),
             dragmode="pan", 
             
-            # PONTO 3: Força o Plotly a mostrar o texto no tamanho 13px sempre
+            # Força o texto a aparecer mesmo se o Plotly achar que não cabe
             uniformtext_minsize=13,
             uniformtext_mode='show',
             
