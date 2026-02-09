@@ -1,19 +1,19 @@
 import streamlit as st
 import plotly.express as px
-import plotly.graph_objects as go # Necessário para o texto flutuante
+import plotly.graph_objects as go
 import pandas as pd
 import conexao
 from datetime import datetime, timedelta
 import calendar
 import pytz 
 
-# --- CONFIGURAÇÃO DE FUSO HORÁRIO ---
+# --- FUSO HORÁRIO ---
 FUSO_BR = pytz.timezone('America/Sao_Paulo')
 
 def get_hoje():
     return datetime.now(FUSO_BR).date()
 
-# --- Função Auxiliar: Datas Padrão ---
+# --- FUNÇÕES AUXILIARES ---
 def get_proxima_semana():
     hoje = get_hoje()
     dias_para_segunda = 7 - hoje.weekday()
@@ -21,7 +21,6 @@ def get_proxima_semana():
     proxima_sexta = proxima_segunda + timedelta(days=4)
     return proxima_segunda, proxima_sexta
 
-# --- Função Auxiliar: Situação e Cores ---
 def calcular_situacao_e_cores(row):
     hoje = get_hoje()
     try:
@@ -124,7 +123,7 @@ def modal_agendamento(df_obras, df_frota, df_time, df_agenda_atual):
                 st.rerun()
             except Exception as e: st.error(f"Erro: {e}")
 
-# --- App Principal ---
+# --- APP PRINCIPAL ---
 def app():
     col_titulo, col_btn = st.columns([4, 1])
     col_titulo.header("📅 Cronograma")
@@ -162,7 +161,7 @@ def app():
     if 'zoom_ini' not in st.session_state: st.session_state['zoom_ini'] = hoje
     if 'zoom_fim' not in st.session_state: st.session_state['zoom_fim'] = hoje + timedelta(days=30)
 
-    # --- BARRA DE VISUALIZAÇÃO ---
+    # --- BARRA DE COMANDOS ---
     st.divider()
     c_botoes, c_status = st.columns([2, 1])
     
@@ -196,33 +195,35 @@ def app():
     df_filtrado = df_processado.loc[mask]
 
     if not df_filtrado.empty:
+        # Ordenação
         mapa_ordem = {"Em Andamento": 1, "Não Iniciada": 2, "Concluída": 3}
         df_filtrado['Ordem'] = df_filtrado['Situacao'].map(mapa_ordem)
         df_filtrado = df_filtrado.sort_values(by=['Ordem', 'Data Início'])
-        
-        # --- PONTO 2: CÁLCULO INTELIGENTE DA POSIÇÃO DO TEXTO (STICKY LABEL) ---
-        # Converte zoom_ini para timestamp para comparação
-        zoom_start_ts = pd.to_datetime(st.session_state['zoom_ini'])
-        
-        # Função: Se a obra começou antes do zoom atual, o texto deve começar na data do zoom
-        # Se não, começa na data real da obra.
-        def get_text_start(row):
-            real_start = row['Data Início']
-            if real_start < zoom_start_ts:
-                return zoom_start_ts
-            return real_start
 
-        df_filtrado['Data_Texto'] = df_filtrado.apply(get_text_start, axis=1)
+        # --- CÁLCULO DA POSIÇÃO DO TEXTO (STICKY LABEL) ---
+        # Converte para datetime para poder comparar
+        zoom_ini_dt = pd.to_datetime(st.session_state['zoom_ini'])
 
+        def calcular_inicio_texto(row):
+            inicio_real = row['Data Início']
+            # Se a obra começa antes do zoom atual, o texto começa no zoom atual (para ficar visível)
+            if inicio_real < zoom_ini_dt:
+                return zoom_ini_dt
+            return inicio_real
+
+        df_filtrado['Posicao_Texto'] = df_filtrado.apply(calcular_inicio_texto, axis=1)
+        
+        # Altura Fixa
         qtd_projetos = len(df_filtrado['Projeto'].unique())
         altura_final = max(300, 100 + (qtd_projetos * 50))
 
-        # --- CAMADA 1: BARRAS (Sem texto interno) ---
+        # --- CAMADA 1: BARRAS (SEM TEXTO) ---
         fig = px.timeline(
             df_filtrado, 
             x_start="Data Início", 
             x_end="Data Fim", 
             y="Projeto",
+            # Removemos o text daqui para não cortar
             height=altura_final,
             hover_data={"Projeto": True, "Descrição": True, "Cliente": True, "Executantes": True}
         )
@@ -235,18 +236,21 @@ def app():
             )
         )
 
-        # --- CAMADA 2: TEXTO FLUTUANTE (SCATTER) ---
-        # Isso permite que o texto "vaze" e "siga" a tela
+        # --- CAMADA 2: TEXTO FLUTUANTE (PRETO E SOLTO) ---
         fig.add_trace(
             go.Scatter(
-                x=df_filtrado['Data_Texto'],
+                x=df_filtrado['Posicao_Texto'], # Usa a data calculada (Sticky)
                 y=df_filtrado['Projeto'],
                 text=df_filtrado['Projeto'],
                 mode='text',
-                textposition='middle right', # Texto começa no ponto e vai pra direita
-                textfont=dict(color='#222222', size=13, weight='bold'), # Cor escura pra ler em cima de tudo
-                hoverinfo='skip', # Não atrapalhar o hover da barra
-                showlegend=False
+                textposition='middle right', # Escreve da esquerda para a direita
+                textfont=dict(
+                    color='#111111', # PRETO (Para aparecer no fundo branco)
+                    size=13, 
+                    weight='bold'
+                ),
+                showlegend=False,
+                hoverinfo='skip'
             )
         )
 
@@ -263,6 +267,7 @@ def app():
                 showgrid=True,
                 gridcolor='#333333',
                 dtick=86400000.0,    
+                # Zoom inicial (o usuário pode arrastar depois)
                 range=[st.session_state['zoom_ini'], st.session_state['zoom_fim']], 
                 ticklabelmode="period", 
                 tickcolor='white',
@@ -284,7 +289,7 @@ def app():
             bargap=0.2 
         )
 
-        # HOJE (Retângulo)
+        # HOJE (Retângulo Ciano)
         fig.add_vrect(
             x0=hoje, x1=hoje + timedelta(days=1),
             fillcolor="#00FFFF", opacity=0.15, layer="below", line_width=0
@@ -295,7 +300,7 @@ def app():
             yshift=10, xshift=20 
         )
 
-        # Fundo Infinito
+        # Fundo Infinito (Para Pan funcionar bem)
         min_dados = df_filtrado['Data Início'].min().date()
         max_dados = df_filtrado['Data Fim'].max().date()
         visual_inicio = min(st.session_state['zoom_ini'], min_dados) - timedelta(days=180)
@@ -331,4 +336,4 @@ def app():
             }
         )
     else:
-        st.info("Nenhuma atividade encontrada neste período.")
+        st.info("Nenhuma atividade encontrada.")
