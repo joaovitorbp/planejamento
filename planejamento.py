@@ -160,7 +160,8 @@ def app():
         st.warning("Sem dados válidos.")
         return
     
-    # --- ALTERAÇÃO AQUI: Data Fim Inclusiva (+1 Dia visual) ---
+    # --- ALTERAÇÃO SOLICITADA ---
+    # Adiciona 1 dia apenas para visualização no gráfico (Preenchimento inclusivo)
     df_processado['Fim_Visual'] = df_processado['Data Fim'] + timedelta(days=1)
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
@@ -220,11 +221,11 @@ def app():
         fig = px.timeline(
             df_filtrado, 
             x_start="Data Início", 
-            x_end="Fim_Visual", # ALTERADO: Usa data inclusiva
+            x_end="Fim_Visual", # USA A COLUNA AUXILIAR AQUI
             y="Projeto",
             text="Projeto",
             height=altura_final, # Altura agora é estrita
-            # Ajusta hover para mostrar Data Fim correta (não a visual)
+            # Adiciona Data Fim (real) e Fim_Visual (auxiliar) aos dados de hover
             hover_data={"Projeto": True, "Descrição": True, "Cliente": True, "Executantes": True, "Data Fim": True, "Fim_Visual": False}
         )
 
@@ -238,7 +239,7 @@ def app():
             insidetextanchor='start', 
             textfont=dict(color='white', weight='bold', size=13),
             constraintext='none', 
-            # REMOVIDO: cliponaxis=False
+            cliponaxis=False 
         )
 
         fig.update_layout(
