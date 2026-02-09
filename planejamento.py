@@ -153,20 +153,17 @@ def app():
     if df_processado.empty:
         st.warning("Sem dados válidos.")
         return
-
-    # --- PONTO 1: DATA INCLUSIVA ---
-    # Soma 1 dia para o visual preencher o último dia corretamente
+    
+    # 1. DATA INCLUSIVA (Visualmente adiciona 1 dia)
     df_processado['Fim_Visual'] = df_processado['Data Fim'] + timedelta(days=1)
 
     df_processado[['Situacao', 'CorFill', 'CorLine']] = df_processado.apply(calcular_situacao_e_cores, axis=1)
 
-    # --- INICIALIZAÇÃO DO ESTADO ---
     hoje = get_hoje()
     if 'view_mode' not in st.session_state: st.session_state['view_mode'] = '30d'
     if 'zoom_ini' not in st.session_state: st.session_state['zoom_ini'] = hoje
     if 'zoom_fim' not in st.session_state: st.session_state['zoom_fim'] = hoje + timedelta(days=30)
 
-    # --- BARRA DE COMANDOS ---
     st.divider()
     c_botoes, c_status = st.columns([2, 1])
     
@@ -209,30 +206,29 @@ def app():
         fig = px.timeline(
             df_filtrado, 
             x_start="Data Início", 
-            x_end="Fim_Visual", # Usa a data visual (inclusiva)
+            x_end="Fim_Visual", 
             y="Projeto",
             text="Projeto",
             height=altura_final,
-            # Tooltip mostra a Data Fim correta (original)
             hover_data={"Projeto": True, "Descrição": True, "Cliente": True, "Executantes": True, "Data Fim": True, "Fim_Visual": False}
         )
 
+        # 2. CONFIGURAÇÃO VISUAL "NUCLEAR" (Sem coisas novas que quebram)
         fig.update_traces(
             marker=dict(
                 color=df_filtrado['CorFill'],
-                line=dict(color=df_filtrado['CorLine'], width=1),
-                cornerradius=5 # MANTIDO
+                line=dict(color=df_filtrado['CorLine'], width=1)
+                # SEM cornerradius
             ),
-            # --- PONTO 2: TEXTO TRAVADO ---
             textposition='inside', 
             insidetextanchor='start',
-            insidetextorientation='horizontal', # MANTIDO
             
-            # Mudei para Preto para ser visível quando vazar
-            textfont=dict(color='#000000', weight='bold', size=13), 
+            # Texto Travado e Cor Preta (Pra ler no fundo branco)
+            insidetextorientation='horizontal',
+            textfont=dict(color='#000000', weight='bold', size=13),
             
-            constraintext='none' # Deixa vazar
-            # cliponaxis FOI REMOVIDO POIS CAUSA ERRO
+            constraintext='none'
+            # SEM cliponaxis
         )
 
         fig.update_layout(
@@ -276,7 +272,7 @@ def app():
         fig.add_vrect(x0=hoje, x1=hoje + timedelta(days=1), fillcolor="#00FFFF", opacity=0.15, layer="below", line_width=0)
         fig.add_annotation(x=hoje, y=1, yref="paper", text="HOJE", showarrow=False, font=dict(color="#00FFFF", weight="bold"), yshift=10, xshift=20)
 
-        # Fundo Infinito
+        # Loop Visual
         min_dados = df_filtrado['Data Início'].min().date()
         max_dados = df_filtrado['Data Fim'].max().date()
         visual_inicio = min(st.session_state['zoom_ini'], min_dados) - timedelta(days=180)
